@@ -3,26 +3,63 @@ import enum
 import abc
 import collections
 import copy
+import threading
 
-class LeetException(Exception):
+class LeetBaseException(Exception):
     """Base class for all LeetException"""
     pass
 
-class LeetPluginException(LeetException):
+class LeetPluginException(LeetBaseException):
     """Class for all plugin exceptions"""
     #TODO save plugin information
     pass
 
+class LeetException(LeetBaseException):
+    """Class for all exceptions outside of plugins"""
+    pass
+
 class LeetJobStatus(enum.Enum):
-    '''Flags the status of an individual job'''
+    '''Flags the status of an individual job.
+
+    How are the states supposed to flow:
+    PENDING -> EXECUTING, CANCELLED
+    EXECUTING -> COMPLETED, CANCELLED, ERROR, PENDING
+
+    There might be a situation where a job has been cancelled, but it is already
+    on it's way, as such, we can also have:
+    CANCELLED -> COMPLETED, ERROR
+    '''
+    #TODO one more status related to pending_cancellation?
     PENDING = 0x0
-    SUCCESS = 0x1
-    FAILURE = 0x2
-    EXECUTING = 0x3
-    PENDING_NEWATTEMPT = 0x4
-    CANCEL_REQUESTED =- 0x5
-    CANCELLED = 0x6
-    ERROR = 0x7
+    EXECUTING = 0x1
+    COMPLETED = 0x2
+    CANCELLED = 0x3
+    ERROR = 0x4
+
+
+class _JobFSM():
+    """A very, very, very simplified state machine to control how a job
+    status can change."""
+    def __init__(self, transitions_table, initial):
+        #self.states = states
+        self._transitions = {}
+        self.current_state = initial
+        self._t_lock = threading.RLock()
+
+        self._process_transitions(transitions_table)
+
+    def _process_transitions(self, transitions_table):
+        for t in transitions_table:
+            self._transitions[(t["source"], t["trigger"])] = t["dest"]
+
+    def next(self, condition):
+        try:
+            self._t_lock.acquire()
+            self.current_state = self._transitions[(self.current_state, condition)]
+        except KeyError as e:
+            raise LeetException(f"Invalid transition from {self.current_state} with trigger {condition}") from e
+        finally:
+            self._t_lock.release()
 
 class LeetJob():
     """Class that represents a Job in Leet. It creates an identifier
@@ -31,15 +68,49 @@ class LeetJob():
     def __init__(self, hostname, plugin_instance):
         self.id = uuid.uuid4()
         self.hostname = hostname
-        #TODO add a lock to control the status, as this can change from the interface and from the backend
-        self.status = LeetJobStatus.PENDING
         self.plugin_result = None
         self.plugin_instance = plugin_instance
+        self._status_machine = None
+
+        self._conf_status_machine()
+
+    @property
+    def status(self):
+        return self._status_machine.current_state
+
+    def _conf_status_machine(self):
+        t = [
+            {"trigger" : "executing", "source" : LeetJobStatus.PENDING, "dest" : LeetJobStatus.EXECUTING},
+            {"trigger" : "cancel", "source" : LeetJobStatus.PENDING, "dest" : LeetJobStatus.CANCELLED},
+            {"trigger" : "pending", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.PENDING},
+            {"trigger" : "cancel", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.CANCELLED},
+            {"trigger" : "completed", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.COMPLETED},
+            {"trigger" : "completed", "source" : LeetJobStatus.CANCELLED, "dest" : LeetJobStatus.COMPLETED},
+            {"trigger" : "error", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.ERROR},
+            {"trigger" : "error", "source" : LeetJobStatus.CANCELLED, "dest" : LeetJobStatus.ERROR}
+        ]
+        self._status_machine = _JobFSM(t, LeetJobStatus.PENDING)
+
+    def pending(self):
+        self._status_machine.next("pending")
+
+    def executing(self):
+        self._status_machine.next("executing")
+
+    def cancel(self):
+        self._status_machine.next("cancel")
+
+    def completed(self):
+        self._status_machine.next("completed")
+
+    def error(self):
+        self._status_machine.next("error")
 
     def __eq__(self, other):
-        if self.id == other.id:
-            return True
+        if isinstance(other, LeetJob):
+            return self.id == other.id
         else:
+            #TODO log?
             return False
 
     def __repr__(self):
@@ -74,16 +145,16 @@ class LeetBackend(metaclass=abc.ABCMeta):
         """Allocate all the necessary resources to allow the backend to start"""
 
     @abc.abstractmethod
-    def add_tasks(self, task):
-        """Must receive a new LeetJob"""
+    def add_task(self, task):
+        """Must receive a LeetJob"""
 
-    # @abc.abstractmethod
-    # def pop_finished_tasks(self):
-    #     """Returns a list of finished LeetJob """
-    #
-    # @abc.abstractmethod
-    # def get_pending_tasks(self):
-    #     """Returns a list of unfinished LeetJob"""
+    @abc.abstractmethod
+    def add_tasks(self, tasks):
+        """Must receive a list of LeetJob"""
+
+    @abc.abstractmethod
+    def cancel_task(self, task):
+        """Must receive a LeetJob"""
 
     def _set_leet_control(self, leet_control):
         """Is called internally to link the Leet parent class with the backend,
@@ -243,23 +314,6 @@ class PluginBase(metaclass=abc.ABCMeta):
     def get_plugin_parameters(self):
         return [v for v in self._ltpg_param.values()]
 
-
-# self._ltpg_param = {}
-#
-# def __init__(self, name, description, mandatory):
-#     self._vars = {"name" : name,
-#                  "description" : description,
-#                  "mandatory" : mandatory,
-#                  "value" : None}
-#
-#
-# self.reg_param(LeetPluginParameter("path", "Path to be listed on the remote endpoint", True))
-#
-#         LEET_PG_NAME = "dirlist"
-#         LEET_PG_DESCRIPTION = "Returns a directory list from a path with STD timestamp data."
-#         LEET_BACKEND = ["cb"]
-#         pass
-
     @abc.abstractmethod
     def run(self, session, hostname):
         """This function has to be overloaded. The plugin will receive a session
@@ -269,7 +323,8 @@ class PluginBase(metaclass=abc.ABCMeta):
 
     def __repr__(self):
         'Return a nicely formatted representation string'
-        return (f'{self.__class__.__name__}('
+        return (f'{self.__class__.__name__}(name={self.LEET_PG_NAME}, '
+                f'description={self.LEET_PG_DESCRIPTION}, '
                 f'_ltpg_param={self._ltpg_param})'
                )
 

@@ -2,29 +2,14 @@ import logging
 import sys
 
 #import leet.cb
-import leet_plugins.dir_list
+#import leet_plugins.dir_list
 
 from cbapi.response import Process, CbResponseAPI, Sensor
 from cbapi.response.models import Sensor as CB_Sensor
 
-#logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-
-class A():
-    #V1 = None
-
-    def f1(self):
-        print(self.V1)
-
-class B(A):
-    V1 = "B"
-
-    def __init__(self):
-        super().__init__()
-
 
 def main():
-    b = B()
-    b.f1()
+    print(uuid.uuid4())
 
 
 

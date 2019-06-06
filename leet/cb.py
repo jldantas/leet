@@ -16,7 +16,8 @@ from cbapi.response import Process, CbResponseAPI, Sensor
 from cbapi.response.models import Sensor as CB_Sensor
 import cbapi.errors
 
-from .base import LeetJobStatus, LeetBackend
+from .base import LeetJobStatus, LeetBackend, LeetException
+
 
 _MOD_LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class _CBCode(enum.Enum):
     PROCESS = 0x2
     RESCHEDULE = 0x3
     FINISHED_NOTIFICATION = 0x4
+    REMOVE_FROM_LIST = 0x5
 
 class _CBTask():
     def __init__(self, leet_job, sensor, cb):
@@ -101,23 +103,35 @@ class _CB_Instance(threading.Thread):
 
     def _execute_task(self, cb_task):
         try:
+            print("****** RAISE BASE EXCEPTION ************")
+            raise Exception("test")
             with cb_task.sensor.lr_session() as session:
                 _MOD_LOGGER.debug("Session for job %s ready. Starting execution.", cb_task.leet_job.id)
-                cb_task.leet_job.status = LeetJobStatus.EXECUTING
+                cb_task.leet_job.executing() #TODO this can raise an exception LeetException.
                 results = cb_task.leet_job.plugin_instance.run(session, cb_task.leet_job.hostname)
-
                 if results.success:
                     cb_task.leet_job.plugin_result = results
-                    cb_task.leet_job.status = LeetJobStatus.SUCCESS
                     _MOD_LOGGER.debug("Job %s was successful.", cb_task.leet_job.id)
                 else:
-                    cb_task.leet_job.status = LeetJobStatus.FAILURE
                     _MOD_LOGGER.debug("Job %s failed.", cb_task.leet_job.id)
+                cb_task.leet_job.completed()
                 self._out_queue.put(_CBComms(_CBCode.FINISHED_NOTIFICATION, cb_task))
         except cbapi.errors.TimeoutError as e:
-            self.leet_job.status = LeetJobStatus.PENDING_NEWATTEMPT
-            self._out_queue.put(_CBComms(_CBCode.RESCHEDULE, cb_task))
-
+            print("****** HANDLER 1")
+            try:
+                #if we trigger this exception here, it means we tried an invalid
+                #change of status and needs to be removed from the processing list
+                self.leet_job.pending()
+                self._out_queue.put(_CBComms(_CBCode.RESCHEDULE, cb_task))
+            except LeetException as e:
+                self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
+        except LeetException as e:
+            print("****** HANDLER 2")
+            self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
+        #TODO! VERY BAD PRACTICE DETECTED. FIND A BETTER WAY TO HANDLE EXCEPTION FROM THREADPOOL
+        except Exception as e:
+            print("****** HANDLER 3")
+            print(e)
 
 
     def _get_sensor_most_recent_checkin(self, sensors):
@@ -153,7 +167,7 @@ class _CB_Instance(threading.Thread):
 
 
 
-class CBBackEnd(LeetBackend):
+class Backend(LeetBackend):
     """Interfaces with the CB api and manages the connection with multiple
     instances of the servers"""
 
@@ -201,6 +215,9 @@ class CBBackEnd(LeetBackend):
                 _MOD_LOGGER.debug("CBBackEnd FINISHED_NOTIFICATION for Job %s.", value.leet_job.id)
                 self._jobs.pop(value.leet_job.id)
                 self.notify_job_completed(value.leet_job)
+            elif code == _CBCode.REMOVE_FROM_LIST:
+                _MOD_LOGGER.debug("CBBackEnd will no longer process Job %s (REMOVE_FROM_LIST).", value.leet_job.id)
+                self._jobs.pop(value.leet_job.id)
             elif code == _CBCode.STOP:
                 break
             else:
@@ -218,9 +235,13 @@ class CBBackEnd(LeetBackend):
             _MOD_LOGGER.debug("Sensor for job %s is Online. Attempting connection.", cb_task.leet_job.id)
             cb_task.cb_instance.add_request(_CBComms(_CBCode.PROCESS, cb_task))
         else:
-            _MOD_LOGGER.debug("Sensor for job %s is Offline. Rescheduling", cb_task.leet_job.id)
-            next_exec = datetime.datetime.now() + self._pool_interval
-            self._sched.add_job(self._trigger_lr, 'date', run_date=next_exec, args=[cb_task])
+            if cb_task.leet_job.status != LeetJobStatus.CANCELLED:
+                _MOD_LOGGER.debug("Sensor for job %s is Offline. Rescheduling", cb_task.leet_job.id)
+                next_exec = datetime.datetime.now() + self._pool_interval
+                self._sched.add_job(self._trigger_lr, 'date', run_date=next_exec, args=[cb_task])
+            else:
+                _MOD_LOGGER.debug("Job %s has been cancelled, remove from the schedule.", cb_task.leet_job.id)
+                self._in_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
 
 
     def _search_machines(self, tasks):
@@ -264,7 +285,8 @@ class CBBackEnd(LeetBackend):
                 _MOD_LOGGER.warning("Machine %s in conflict. Resolution points to usage of instance '%s'.", hostname, list_tasks[0].cb_instance.url)
             elif len(list_tasks) >= 2 and not self.enable_solve_conflict:
                 _MOD_LOGGER.warning("Machine %s in conflict. Cancelling job.", hostname)
-                list_tasks[0].leet_job.status = LeetJobStatus.ERROR
+                list_tasks[0].leet_job.error()
+                #list_tasks[0].leet_job.status = LeetJobStatus.ERROR
                 continue
             new_result.append(list_tasks[0])
 
@@ -273,7 +295,10 @@ class CBBackEnd(LeetBackend):
     def get_pending_tasks(self):
         return [cb_task.leet_job for cb_task in self._jobs.values()]
 
-
+    def add_task(self, task):
+        """Add a new task. We just cheat and use the same path as multiple machines"""
+        tasks = [task]
+        self.add_tasks(tasks)
 
     def add_tasks(self, tasks):
         """Add a new tasks to be processed by the backend.
@@ -294,8 +319,12 @@ class CBBackEnd(LeetBackend):
             self._jobs[cb_task.leet_job.id] = cb_task
             self._sched.add_job(self._trigger_lr, 'date', args=[cb_task])
 
+    def cancel_task(self, task):
+        """Must receive a LeetJob"""
+        pass
+
     def start(self):
-        """Find the necessary profiles and start a connection with each of them.
+        """Find the necessary profiles and start a connection with each of them
         and starts the necessary threads.
         """
         if not self._started:

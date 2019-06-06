@@ -11,7 +11,7 @@ from leet.base import LeetJob, LeetJobStatus, LeetPluginException
 
 import tabulate
 
-_LEVEL = logging.INFO
+_LEVEL = logging.DEBUG
 _MOD_LOGGER = logging.getLogger(__name__)
 _MOD_LOGGER.setLevel(_LEVEL)
 _log_handler = logging.StreamHandler()
@@ -48,7 +48,7 @@ class LeetTerminal(cmd.Cmd):
         super().__init__()
 
         #TODO allow backend configuration and setting
-        self._leet = leet.api.Leet(leet.cb.CBBackEnd(["default"]))
+        self._leet = leet.api.Leet(leet.cb.Backend(["default"]))
         self._leet.start()
 
         while not self._leet.ready:
@@ -189,6 +189,9 @@ class LeetTerminal(cmd.Cmd):
         status = self._leet.job_status
         pretty_jobs_status(status)
 
+    def do_cancel_all_jobs(self, args):
+        self._leet.cancel_all_jobs()
+
     def close(self):
         self._leet.close()
         self._leet.join()
@@ -256,39 +259,11 @@ def main():
         cli.cmdloop()
     except KeyboardInterrupt:
         print("Exiting event loop")
+    # except Exception as e:
+    #     print(e)
+    finally:
         cli.close()
-    except Exception as e:
-        print(e)
-        cli.close()
 
-def main2():
-    plugins = load_plugins()
-    #hostnames = ["WINWORK"]
-    #hostnames = ["DESKTOP-90N8EBG"]
-    #hostnames = ["WINWORK", "DESKTOP-90N8EBG"]
-    #hostnames = ["WINWORK", "DESKTOP-90N8EBG", "IT2168977W1"]
-    hostnames = ["US1004511WP", "DESKTOP-90N8EBG"]
-
-    pg_param = {"path" : "c:\\"}
-
-
-    with leet.cb.CBBackEnd(["default"]) as lt_cb:
-    #with leet.cb.CBBackEnd(["all"]) as lt_cb:
-        #job_list = start_jobs(lt_cb, hostnames, plugins["dirlist"], pg_param)
-        job_list = start_jobs(lt_cb, hostnames, plugins["dirlist"], pg_param)
-
-        try:
-            while True:
-                time.sleep(10)
-                tasks = lt_cb.pop_finished_tasks()
-
-                for job in tasks:
-                    pretty_print(job)
-                #_MOD_LOGGER.debug("%s", job_list)
-        except KeyboardInterrupt:
-            print("Exiting event loop")
-
-        #TODO check everything was executed and quit
 
 
 #

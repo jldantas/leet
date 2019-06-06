@@ -6,7 +6,7 @@ import threading, queue
 import itertools
 import enum
 
-from .base import LeetJob, LeetJobStatus, LeetPluginException
+from .base import LeetJob, LeetJobStatus, LeetPluginException, LeetException
 
 _MOD_LOGGER = logging.getLogger(__name__)
 _PLUGIN_DIR = "plugins"
@@ -28,6 +28,7 @@ def _load_plugins(plugin_dir=_PLUGIN_DIR):
     if not len(found_plugins):
         #TODO better error information
         print("No plugin found. Stopping things.")
+    _MOD_LOGGER.debug("Plugins found: %s", found_plugins)
     plugin_names = map(lambda fname: "." + os.path.splitext(fname)[0], found_plugins)
     #importlib.import_module(plugin_dir, package="leet") #import the parent module
     importlib.import_module("leet.plugins") #import the parent module
@@ -39,41 +40,42 @@ def _load_plugins(plugin_dir=_PLUGIN_DIR):
     return plugins
 
 class _LTControl(enum.Enum):
-    """
-    STOP - None
-    NEW_JOB - LeetJob
-    NEW_JOBS - [LeetJob]
-    JOB_COMPLETED_NOTIFICATION - LeetJob
+    """ An internal control flag to tell what the thread handling Leet should
+    do. This way all interaction happens via the internal control queue, making
+    it easier to sync. This will always be passed as the first value of a tuple
+    and the next values are documented here.
 
+    Control command            | Value
+    =======================================
+    STOP                       | None
+    NEW_JOB                    | LeetJob
+    NEW_JOBS                   | [LeetJob]
+    JOB_COMPLETED_NOTIFICATION | LeetJob
+    CANCEL_JOB                 | LeetJob
     """
     STOP = 0x0
     NEW_JOB = 0x1
     NEW_JOBS = 0x2
     JOB_COMPLETED_NOTIFICATION = 0x3
-
-
-    # PROCESS = 0x2
-    # RESCHEDULE = 0x3
-    # FINISHED_NOTIFICATION = 0x4
-
+    CANCEL_JOB = 0x4
 
 class Leet(threading.Thread):
     def __init__(self, backend, notify_queue=None, plugin_dir=_PLUGIN_DIR):
         super().__init__(name="Thr-Leet")
         self._plugins = None
-        self._queue = queue.Queue()
+        self._queue = queue.SimpleQueue()
         self._backend = backend
         self._job_list = []
         #TODO receive a queue and put the result of the job on the queue,
         #   allowing realtime notification of completed jobs
         self._notify_queue = notify_queue
-        self._ready = False
+        self.ready = False
 
         self._completed_list_lock = threading.Lock()
         self._completed_list = []
 
         self._backend._set_leet_control(self)
-        self.plugin_reload()
+        self.reload_plugins()
 
 
     @property
@@ -94,15 +96,16 @@ class Leet(threading.Thread):
 
         return status
 
-    # @property
-    # def completed_jobs(self):
-    #     return
-
     def _set_finished_job(self, leet_job):
         self._completed_list_lock.acquire()
         self._job_list.remove(leet_job)
         self._completed_list.append(leet_job)
         self._completed_list_lock.release()
+
+    def _notifyjob(self, job):
+        """An internal function called by the LeetBackend to notify a job has
+        been completed."""
+        self._queue.put((_LTControl.JOB_COMPLETED_NOTIFICATION, job))
 
     def run(self):
         with self._backend.start() as backend:
@@ -111,19 +114,23 @@ class Leet(threading.Thread):
                 # try:
                     #code, value = in_queue.get(timeout=10)
                 code, value = self._queue.get()
+                _MOD_LOGGER.debug("Received request for '%s'", code)
                 if code == _LTControl.STOP:
                     break
                 elif code == _LTControl.NEW_JOBS:
                     backend.add_tasks(value)
                     self._job_list += value
+                elif code == _LTControl.NEW_JOB:
+                    backend.add_task(value)
+                    self._job_list.append(value)
                 elif code == _LTControl.JOB_COMPLETED_NOTIFICATION:
                     self._set_finished_job(value)
-
+                elif code == _LTControl.CANCEL_JOB:
+                    value.cancel()
+                    backend.cancel_task(value)
                 else:
-                    #TODO exception
+                    raise LeetException(f"No internal handling code for {code}.")
                     pass
-
-
 
                 # except queue.Empty as e:
                 #     f_tasks = lt_cb.pop_finished_tasks()
@@ -141,10 +148,8 @@ class Leet(threading.Thread):
 
         return temp_list
 
-    def _notifyjob(self, job):
-        self._queue.put((_LTControl.JOB_COMPLETED_NOTIFICATION, job))
-
-    def plugin_reload(self):
+    def reload_plugins(self):
+        _MOD_LOGGER.debug("(Re)loading plugins.")
         self._plugins = _load_plugins()
 
     def get_plugin(self, plugin_name):
@@ -159,8 +164,21 @@ class Leet(threading.Thread):
     def start_jobs(self, hostnames, plugin):
         """A list of hostnames, a plugin instance"""
         plugin.check_param()
+        _MOD_LOGGER.debug("Requesting jobs for %i machines", len(hostnames))
         self._queue.put((_LTControl.NEW_JOBS, [LeetJob(hostname, plugin) for hostname in hostnames]))
 
+    def cancel_job(self, job):
+        """job - LeetJob"""
+        self._queue.put((_LTControl.CANCEL_JOB, job))
+        pass
+
+    def cancel_by_id(self, id):
+        """id - uuid"""
+        self.cancel_job(self._job_list[id])
+
+    def cancel_all_jobs(self):
+        for job in self._job_list:
+            self.cancel_job(job)
 
     def close(self):
         self._queue.put((_LTControl.STOP, None))
