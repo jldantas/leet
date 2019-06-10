@@ -8,7 +8,7 @@ LEET_BACKEND is a list of backends the plugin supports.
 #TODO I think it can support only one backend, so we should expand or remove it.
 #TODO create an abstraction layer between the backend and the plugins
 
-The overriding must be called LeetPlugin
+The overriding class must be called LeetPlugin.
 
 To create a plugin it is necessary to create a subclass of 'leet.base.PluginBase'
 and override the method 'run'. The method 'run' receives an instance of the
@@ -23,7 +23,8 @@ the plugin expects to receive from the user.
 The newly created plugin MUST be stateless, which means that no information
 other than the one requested by the 'leet.base.PluginBase' constructor should
 be saved on the instance. The LEET code will create ONE single instance per group
-of jobs and rely on a instance level state can cause undefined behaviour.
+of jobs and if the plugin implementation relies on an instance level state it
+can cause undefined behaviour.
 
 Once the plugin has finished what it needs to do, the result MUST be an instance
 of 'leet.base.PluginResult' correctly formed. That is a two fold need: if the

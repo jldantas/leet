@@ -7,7 +7,6 @@ Leverage EDR for Execution of Things
 
 ```
 Python >= 3.6
-transitions
 ```
 
 For the CLI:
@@ -23,10 +22,13 @@ apscheduler
 cbapi
 ```
 
-
 ### Installation
 
-TODO
+```
+pip install tabulate apscheduler cbapi
+```
+
+Clone the git repository and run: `python leet.py`
 
 ### Usage
 
