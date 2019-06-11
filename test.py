@@ -1,5 +1,7 @@
 import logging
 import sys
+import threading
+import time
 
 #import leet.cb
 #import leet_plugins.dir_list
@@ -8,25 +10,18 @@ from cbapi.response import Process, CbResponseAPI, Sensor
 from cbapi.response.models import Sensor as CB_Sensor
 
 
+def wait():
+    time.sleep(2)
+    sys.stdin.write("ha ha\n")
+
+
 def main():
-    print(uuid.uuid4())
+    t = threading.Thread(target=wait)
+    t.start()
+    v = input()
+    print(v)
 
 
-
-# def main():
-#     a = Test()
-#     b = Test1()
-#     c = Test2()
-#
-#     print(a.A, b.A, c.A)
-
-
-# class Test():
-#     def run(self, session):
-#         return session.list_directory("c:\\")
-#
-#
-#
 # def main():
 #     hostnames = ["US1004511WP"]
 #     cb = CbResponseAPI()

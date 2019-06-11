@@ -114,7 +114,7 @@ class Leet(threading.Thread):
         ready (bool): True or false if LEET is ready to start receiving jobs
     """
 
-    def __init__(self, backend, notify_queue=None, plugin_dir=_PLUGIN_DIR):
+    def __init__(self, backend, plugin_dir=_PLUGIN_DIR):
         """Creates a new Leet() object. It receives an instance of the backend
         that will be used for communication and a path where to look for the
         plugins.
@@ -134,13 +134,11 @@ class Leet(threading.Thread):
         #TODO add support to multiple backends at the same time
         self._backend = backend
         self._job_list = []
-        #TODO receive a queue and put the result of the job on the queue,
-        #   allowing realtime notification of completed jobs
-        self._notify_queue = notify_queue
-        self.ready = False
+        self._completed_event = threading.Event()
 
         self._completed_list_lock = threading.Lock()
         self._completed_list = []
+        self.ready = False
 
         self._backend._set_leet_control(self)
         #TODO plugin load/reload should be independent from LEET
@@ -206,6 +204,7 @@ class Leet(threading.Thread):
                     self._job_list.append(value)
                 elif code == _LTControl.JOB_COMPLETED_NOTIFICATION:
                     self._set_finished_job(value)
+                    self._completed_event.set()
                 elif code == _LTControl.CANCEL_JOB:
                     #TODO handle if the job does not exists
                     #TODO handle error if a completed job is requested to be cancelled (LeetError)
@@ -217,6 +216,25 @@ class Leet(threading.Thread):
                 # except queue.Empty as e:
                 #     f_tasks = lt_cb.pop_finished_tasks()
                 #     tasks += f_tasks
+
+    #TODO bind all public methods to check if the backend is ready?
+    def wait_until_completed_job(self, timeout=None):
+        """Wait until a job is completed. If there are no completed jobs, the call
+        will block. If there are any completed jobs, it will not block.
+
+        If the interface has a particular thread waiting to be informed about completed
+        jobs, it should call this function and block. Once the results have been
+        returned, it can wait once again.
+
+        Returns:
+            (bool): True if there are completed jobs or False if there are none. Note
+                False is only returned if timeout is provided and it actually times out.
+                Otherwise, it will block until something happens.
+        """
+        wait_result = self._completed_event.wait(timeout)
+        self._completed_event.clear()
+        
+        return wait_result
 
     def return_completed_jobs(self):
         """This will return the completed jobs AND remove from the internal control.
@@ -231,6 +249,7 @@ class Leet(threading.Thread):
         temp_list = self._completed_list
         self._completed_list = []
         self._completed_list_lock.release()
+        self._completed_event.clear()
 
         return temp_list
 
@@ -302,8 +321,9 @@ class Leet(threading.Thread):
     def close(self):
         """Stop the execution of Leet and free all the resources, including the
         backend resources."""
-        self._queue.put((_LTControl.STOP, None))
         self.ready = False
+        self._queue.put((_LTControl.STOP, None))
+        self._completed_event.set()
         #self.
 
     def __enter__(self):

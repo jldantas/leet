@@ -51,10 +51,12 @@ class LeetTerminal(cmd.Cmd):
         self._leet = None
         self.machine_list = None
         self.plugin = None
+        self._notified = False
+        self._notify_thread = threading.Thread(target=self.wait_job, name="Thr-CLI-Notify")
 
     def conn_start(self):
-        #self._leet = leet.api.Leet(leet.cb.Backend(["default"]))
-        self._leet = leet.api.Leet(leet.cb.Backend(["all"]))
+        self._leet = leet.api.Leet(leet.cb.Backend(["default"]))
+        #self._leet = leet.api.Leet(leet.cb.Backend(["all"]))
 
         _MOD_LOGGER.info("Waiting for LEET to be ready.")
         self._leet.start()
@@ -62,8 +64,20 @@ class LeetTerminal(cmd.Cmd):
             time.sleep(1)
         _MOD_LOGGER.info("LEET is ready.")
 
+        _MOD_LOGGER.debug("Starting CLI monitoring thread")
+        self._notify_thread.start()
+
         self.machine_list = None
         self.plugin = None
+
+    def wait_job(self):
+        while self._leet.ready:
+            self._leet.wait_until_completed_job()
+            if not self._notified:
+                print("\nSomething finished. Use 'show' to get the results.")
+                LeetTerminal.prompt = "! LEET> "
+                self._notified = True
+
 
     def do_machines(self, args):
         """machines host1,host2,host3...
@@ -184,6 +198,9 @@ class LeetTerminal(cmd.Cmd):
 
     def do_show(self, args):
         completed_jobs = self._leet.return_completed_jobs()
+        self._notified = False
+        LeetTerminal.prompt = "LEET> "
+
         if completed_jobs:
             for job in completed_jobs:
                 pretty_print(job)
@@ -246,7 +263,8 @@ class LeetTerminal(cmd.Cmd):
     def do_test(self, line):
         #hostnames = ["US1004511WP", "DESKTOP-90N8EBG"]
         #hostnames = ["DESKTOP-90N8EBG"]
-        hostnames = ["US1004511WP"]
+        #hostnames = ["US1004511WP"]
+        hostnames = ["SPEEDYTURTLEW10"]
 
         pg = self._leet.get_plugin("dirlist")
         pg_param = {"path" : "c:\\"}
