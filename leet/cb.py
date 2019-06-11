@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""An implementation of using Carbon Black Live Response as a backend.
+
+Basically, this backend structure has:
+- One thread in the main class, to monitor the data coming from the instances
+- One thread per instance, that interfaces with the CB servers
+- One groups of threads per instance, that interfaces with Live response sessions
+
+"""
 import configparser
 import logging
 import threading
@@ -24,23 +33,31 @@ _MOD_LOGGER = logging.getLogger(__name__)
 _CBComms = collections.namedtuple("_CBComms", ("code", "value"))
 
 class _CBCode(enum.Enum):
-    """
-    A SEARCH command value is a tuple composed of: (_search_command)
-        - An event sync mechanism per thread
-        - A common list for data return
-        - A list of LeetJob
-        * Returns a list of _CBTask iwth sensor and cb correctly filled
+    """An internal control flag to allow communication between the instances and
+    the main backend class. This will always be passed as the first value of a tuple
+    and the next values are documented here.
 
-    A STOP command value is always None.
+    Control command            | Value
+    =======================================
+    STOP                      | None
+    SEARCH                    | (threading.Event, [], [LeetJob])
+    PROCESS                   | _CBTask
+    RESCHEDULE                | _CBTask
+    FINISHED_NOTIFICATION     | _CBTask
+    REMOVE_FROM_LIST          | _CBTask
 
-    A PROCESS command value is a _CBTask
 
-    A RESCHEDULE command sends a _CBTask back to schedule
-        - value is _CBTask
-
-    A FINISHED_NOTIFICATION is to notify the main manager that something is done
-        - value is a _CBTask
-
+    A SEARCH command is required when the jobs are submitted and the backend is
+        trying to fing the respective sensors.
+    A STOP command stops the instances threads for a clean exit
+    A PROCESS command starts the execution of a plugin for a specific job
+    A RESCHEDULE command happens when the sensor is not online, rescheduling it
+        for a later time or when a session is lost in the middle of execution (timeout)
+    A FINISHED_NOTIFICATION is triggered if a job has been completed,
+        independenlty if the result is success or not. This let's the main backend
+        thread know that something finished and inform the api
+    A REMOVE_FROM_LIST is used in case of cancellation or error, effectively removing
+        the job from the list of things to process
     """
     STOP = 0x0
     SEARCH = 0x1
@@ -50,7 +67,26 @@ class _CBCode(enum.Enum):
     REMOVE_FROM_LIST = 0x5
 
 class _CBTask():
+    """A simple wrapper to a LeetJob that allows the backend to add relevant
+    information for control.
+
+    Attributes:
+        leet_job (LeetJob): The leet_job related to the object
+        sensor (cbapi.response.Sensor): The sensor where the job will be executed
+        cb_instance (_CBInstance): Instance where the sensor can be found
+
+    Returns:
+        _CBTask: A new task
+    """
+
     def __init__(self, leet_job, sensor, cb):
+        """Returns a new _CBTask object.
+
+        Args:
+            leet_job (LeetJob): The LeetJob to be executed
+            sensor (cbapi.response.Sensor): The sensor where the job will be executed
+            cb_instance (_CBInstance): Instance where the sensor can be found
+        """
         self.leet_job = leet_job
         self.sensor = sensor
         self.cb_instance = cb
@@ -62,21 +98,42 @@ class _CBTask():
                )
 
 #TODO probably not the best way, will be resource intensive
-class _CB_Instance(threading.Thread):
-    _WAIT_TIMEOUT = 10
+class _CBInstance(threading.Thread):
+    """Connects to one instance of the CB servers, based on the profile and
+    handles all the communication to/from the instance. This includes LR
+    sessions.
+    """
 
     def __init__(self, profile_name, output_queue, max_sessions):
+        """Returns a new object of _CBInstance. The creation of the object
+        implies in a connection attempt.
+
+        Once the object has been created, it is necessary to call the method
+        'start()'.
+
+        Args:
+            profile_name (str): The profile name of the servers, as in the
+                "credentials.response" file, that we will connect to
+            output_queue (queue.Queue): The queue for communication with the Backend class
+            max_sessions (int): the maximum number of live resopnse sessions that
+                can exist at the same time.
+
+        Returns:
+            _CBInstance: New instance
+        """
         super().__init__(name="Thr-" + profile_name)
         self._cb = CbResponseAPI(profile=profile_name)
-        self._lr_workers = concurrent.futures.ThreadPoolExecutor(max_workers=max_sessions, thread_name_prefix="Thr-lr-workers")
+        self._lr_workers = concurrent.futures.ThreadPoolExecutor(max_workers=max_sessions, thread_name_prefix="Thr-" + profile_name + "-lr-workers")
         self._in_queue = queue.Queue()
         self._out_queue = output_queue
 
     @property
     def url(self):
+        """The Carbon Black server URL"""
         return self._cb.url
 
     def run(self):
+        """Starts the processing of the main queue"""
         _MOD_LOGGER.debug("Starting thread for cb instance")
         while True:
 
@@ -91,17 +148,33 @@ class _CB_Instance(threading.Thread):
                 break
             if code == _CBCode.PROCESS:
                 self._lr_workers.submit(self._execute_task, value) #does not block, so it is fine
+            else:
+                #TODO raise error
+                pass
 
             self._in_queue.task_done()
-
 
         _MOD_LOGGER.debug("Thread finished.")
         #TODO potential clean up code
 
     def add_request(self, cb_comms):
+        """Add a request to be processed by the instance.
+
+        Args:
+            cb_comms (_CBComms): An object of with what the instance will perform
+                and the necessary parameters for it to happen. See the _CBCode
+                class documentation for valid options
+        """
         self._in_queue.put(cb_comms)
 
     def _execute_task(self, cb_task):
+        """Once a machine is available, this function tries to connect via LR
+        and execute the plugin. It is also the main coordinator to get the plugin
+        result and notify the backed.
+
+        Args:
+            cb_task (_CBTask): The task that will be attempted to execute
+        """
         try:
             with cb_task.sensor.lr_session() as session:
                 _MOD_LOGGER.debug("Session for job %s ready. Starting execution.", cb_task.leet_job.id)
@@ -122,17 +195,34 @@ class _CB_Instance(threading.Thread):
                 self._out_queue.put(_CBComms(_CBCode.RESCHEDULE, cb_task))
             except LeetError as e:
                 self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
+        except cbapi.live_response_api.LiveResponseError as e:
+            _MOD_LOGGER.exception(e)
+            cb_task.leet_job.error()
+            self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
         except LeetError as e:
-            print("****** HANDLER 2")
+            #print("****** HANDLER 2")
+            _MOD_LOGGER.exception(e)
+            cb_task.leet_job.error()
             self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
         # #TODO! VERY BAD PRACTICE DETECTED. FIND A BETTER WAY TO HANDLE EXCEPTION FROM THREADPOOL
-        # except Exception as e:
-        #     print("****** HANDLER 3")
-        #     print(e)
+        except Exception as e:
+            print("****** HANDLER 3")
+            _MOD_LOGGER.exception(e)
+            print(e)
 
 
     def _get_sensor_most_recent_checkin(self, sensors):
-        """of a list of same sensors, returns the one with the most recent checkin"""
+        """Get the most recent sensor from a list of sensors.
+
+        If a sensor has the same hostname (unlikely, but possible), this function
+        will return the sensor with the most recent checkin. The ASSUMPTION is that
+        if the most recent machine is the correct one. This implies that this
+        backend does not support multiple machines with the same hostname.
+
+        Args:
+            sensors (list of Sensors): List of sensors to be compared against each
+                other
+        """
         temp_sensor = None
 
         for sensor in sensors:
@@ -145,12 +235,29 @@ class _CB_Instance(threading.Thread):
         return temp_sensor
 
     def get_sensor(self, hostname):
+        """Return one or more sensors, given a hostname.
+
+        Args:
+            hostname (str): The machine name
+
+        Returns:
+            [Sensor]: The list of sensors
+        """
         query = "hostname:" + hostname
         sensors = self._cb.select(Sensor).where(query)
 
         return self._get_sensor_most_recent_checkin(sensors)
 
     def _search_command(self, t_event, result, tasks):
+        """Executes the search command.
+
+        Args:
+            t_event (threading.Event): The event that notifies the search has
+                been completed
+            result (list of _CBTask): List where the sensors will be added
+            tasks (list of LeetJob): The list of jobs, and consequently, the machines,
+                that are being searched in this instance.
+        """
         i = 0
         for task in tasks:
             sensor = self.get_sensor(task.hostname)
@@ -162,13 +269,45 @@ class _CB_Instance(threading.Thread):
         _MOD_LOGGER.debug("This instance has finished searching.")
         t_event.set()
 
-
-
 class Backend(LeetBackend):
-    """Interfaces with the CB api and manages the connection with multiple
-    instances of the servers"""
+    """Main Carbon Black backend class.
+
+    The main purpose of this class is to interface between the CB servers (using
+    the _CBInstance class) and the Leet API and coordinate tasks between the many
+    instances.
+
+    To achieve this, it creates all the necessary classes to connect with the
+    servers, a schedulers, to check if the machines are online and keeps monitoring
+    the output of the instances to check if something changed.
+
+    Attributes:
+        enable_solve_conflict (bool): If true, in case a machine is found in multiple
+            instances, it will get the one with the earliest checking time and
+            proceed with execution. If it is false, the job in conflict will be
+            marked as an error.
+    """
 
     def __init__(self, profile_list=["default"], pool_interval=20, max_lr_sessions=10):
+        """Creates a new CB Backend instance.
+
+        Connection to the servers are not started until the method start is called
+        or the instance is opened in a context manager.
+
+        Args:
+            profile_list (list of str): Which intances the backend will try to connect.
+                The names should be the same names found on the "credentials.response"
+                file. If the special name `all` is present, the credentials file will
+                be parsed and the backend will try to connect to all the classes.
+                Default is a list with a single entry connecting to the 'default'
+                profile.
+            pool_interval (int): The amount of time the backen will wait to check
+                if a machine is online
+            max_lr_sessions (int): The maximum amount of concurrent live response
+                sessions, per instance.
+
+        Returns:
+            Backend: Instance
+        """
         super().__init__("cb")
 
         self._threads = []  #threads for instances, one per instance
@@ -187,13 +326,17 @@ class Backend(LeetBackend):
 
         # if there is a profile called all, load all profiles
         if "all" in profile_list:
-            self.profile_list = self._find_profiles()
+            self._profile_list = self._find_profiles()
         else:
             self._profile_list = profile_list
 
 
     def _find_profiles(self):
-        """Find all the profiles available in the carbonblack credentials files."""
+        """Find all the profiles available in the carbonblack.credentials files.
+
+        Returns:
+            list of str: A list with the name of each profile
+        """
         config = configparser.ConfigParser(default_section="cbbackend", strict=True)
         config.read(".carbonblack/credentials.response")
         profile_list = [sec_name for sec_name in config.keys() if sec_name != "cbbackend"]
@@ -201,9 +344,8 @@ class Backend(LeetBackend):
 
         return profile_list
 
-
-
     def _monitor_queue(self):
+        """Monitor the queue for any communication from the instances"""
         while True:
             code, value = self._in_queue.get()
             if code == _CBCode.RESCHEDULE:
@@ -226,6 +368,9 @@ class Backend(LeetBackend):
     def _trigger_lr(self, cb_task):
         """If the machine is available, trigger start of live response. If it is not,
         reschedule the job for the future. This should be called only by the scheduler.
+
+        Args:
+            cb_task (_CBTask): The task that will be checked.
         """
         cb_task.sensor.refresh()
         if cb_task.sensor.status == "Online":
@@ -242,11 +387,17 @@ class Backend(LeetBackend):
 
 
     def _search_machines(self, tasks):
-        """
-        Searches for the machines in all instances, wait for the answer and return
+        """Searches for the machines in all instances, wait for the searches
+        to complete and return a list of _CBTask.
 
-        Receives a list of LeetJob
-        Returns a list of _CBTask
+        It is important to note the search WILL timeout after 30 seconds and
+        after that period, searches might be incomplete.
+
+        Args:
+            tasks (list of LeetJob): A list of jobs we need to find sensors for
+
+        Returns:
+            (list of _CBTask): A list of _CBTask for the machines that were found
         """
         t_events = []
         result = []
@@ -263,6 +414,7 @@ class Backend(LeetBackend):
             t_status.add(t_events[i].wait(1))
         _MOD_LOGGER.debug("Search completed.")
         #TODO if t_status has a false, we have a search problem and need to recover
+        #TODO better handling of the timeout
 
         return result
 
@@ -271,7 +423,13 @@ class Backend(LeetBackend):
         """A conflict is defined as a machine be found on different instances.
         The solution is to return the one with the most recent checkin.
 
-        Result is a list of _CBTask sorted by hostname
+        Args:
+            results (list of _CBTask): A list of _CBTask where to try and solve
+                the conflicts
+
+        Returns:
+            (list of _CBTask): A list of _CBTask with the tasks in conflict
+                removed
         """
         new_result = []
 
@@ -283,24 +441,33 @@ class Backend(LeetBackend):
             elif len(list_tasks) >= 2 and not self.enable_solve_conflict:
                 _MOD_LOGGER.warning("Machine %s in conflict. Cancelling job.", hostname)
                 list_tasks[0].leet_job.error()
-                #list_tasks[0].leet_job.status = LeetJobStatus.ERROR
                 continue
             new_result.append(list_tasks[0])
 
         return new_result
 
     def get_pending_tasks(self):
+        """Returns which tasks are still pending for the backend.
+
+        Returns:
+            list of LeetJob
+        """
         return [cb_task.leet_job for cb_task in self._jobs.values()]
 
     def add_task(self, task):
-        """Add a new task. We just cheat and use the same path as multiple machines"""
+        """Add a new task. We just cheat and use the same path as multiple machines.
+
+        Args:
+            task (LeetJob): A single job to be executed
+        """
         tasks = [task]
         self.add_tasks(tasks)
 
     def add_tasks(self, tasks):
         """Add a new tasks to be processed by the backend.
 
-        Receives a list of LeetJob
+        Args:
+            tasks (list of LeetJob): Receives a list of LeetJob
         """
         result = self._search_machines(tasks)
 
@@ -329,7 +496,7 @@ class Backend(LeetBackend):
             for profile_name in self._profile_list:
                 instance = None
                 try:
-                    instance = _CB_Instance(profile_name, self._in_queue, self._max_lr_sessions)
+                    instance = _CBInstance(profile_name, self._in_queue, self._max_lr_sessions)
                     self._threads.append(instance)
                     _MOD_LOGGER.info("Successfully connected to profile [%s]", profile_name)
                 except cbapi.errors.ApiError as e:

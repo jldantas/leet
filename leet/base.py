@@ -24,12 +24,12 @@ class LeetJobStatus(enum.Enum):
     '''Flags the status of an individual job.
 
     How are the states supposed to flow:
-    PENDING -> EXECUTING, CANCELLED
+    PENDING -> EXECUTING, CANCELLED, ERROR
     EXECUTING -> COMPLETED, CANCELLED, ERROR, PENDING
 
     There might be a situation where a job has been cancelled, but it is already
     on it's way, as such, we can also have:
-    CANCELLED -> COMPLETED, ERROR
+    CANCELLED -> COMPLETED
     '''
     #TODO one more status related to pending_cancellation?
     PENDING = 0x0
@@ -162,7 +162,7 @@ class LeetJob():
             {"trigger" : "completed", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.COMPLETED},
             {"trigger" : "completed", "source" : LeetJobStatus.CANCELLED, "dest" : LeetJobStatus.COMPLETED},
             {"trigger" : "error", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.ERROR},
-            {"trigger" : "error", "source" : LeetJobStatus.CANCELLED, "dest" : LeetJobStatus.ERROR}
+            {"trigger" : "error", "source" : LeetJobStatus.PENDING, "dest" : LeetJobStatus.ERROR}
         ]
         self._status_machine = _JobFSM(t, LeetJobStatus.PENDING)
 

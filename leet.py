@@ -48,17 +48,22 @@ class LeetTerminal(cmd.Cmd):
         super().__init__()
 
         #TODO allow backend configuration and setting
-        self._leet = leet.api.Leet(leet.cb.Backend(["default"]))
-        self._leet.start()
-
-        while not self._leet.ready:
-            _MOD_LOGGER.debug("Waiting for LEET to be ready.")
-            time.sleep(1)
-        _MOD_LOGGER.debug("LEET is ready.")
-
+        self._leet = None
         self.machine_list = None
         self.plugin = None
 
+    def conn_start(self):
+        #self._leet = leet.api.Leet(leet.cb.Backend(["default"]))
+        self._leet = leet.api.Leet(leet.cb.Backend(["all"]))
+
+        _MOD_LOGGER.info("Waiting for LEET to be ready.")
+        self._leet.start()
+        while not self._leet.ready:
+            time.sleep(1)
+        _MOD_LOGGER.info("LEET is ready.")
+
+        self.machine_list = None
+        self.plugin = None
 
     def do_machines(self, args):
         """machines host1,host2,host3...
@@ -245,6 +250,7 @@ class LeetTerminal(cmd.Cmd):
 
         pg = self._leet.get_plugin("dirlist")
         pg_param = {"path" : "c:\\"}
+        #pg_param = {"path" : "c:\\akljsdf"}
         pg.set_param(pg_param)
         self._leet.start_jobs(hostnames, pg)
 
@@ -256,8 +262,10 @@ def main():
     cli = LeetTerminal()
 
     try:
+        cli.conn_start()
         cli.cmdloop()
     except KeyboardInterrupt:
+        #TODO if we cancel while still trying to connect?
         print("Exiting event loop")
     # except Exception as e:
     #     print(e)

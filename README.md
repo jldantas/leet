@@ -55,10 +55,16 @@ Not in a particular order of importance.
 - Do performance tests
 - Move CB backend thread pool for the sessions to a process pool (allowing the plugin to perform more cpu intensive tasks)
 - Add api support to save results of a plugin to a file
+- Add the ability of executing "routines", e.g., a group of plugins, in order
+- CLI should also read a job file and configure itself properly
+- Find a way to efficiently handle errors from threadpools (cb backend)
+- Bubble the error from the plugin/backend to the api
+- Save jobs to continue later
 
 ## Features
 
-TODO
+It will persistently and relentlessly try to connect to the endpoint and
+do it's best to execute whatever was requested.
 
 ## CHANGELOG
 

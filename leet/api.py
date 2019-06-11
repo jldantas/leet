@@ -9,7 +9,36 @@ this thread. As such, almost no calls to the functions in Leet will block the
 main application thread. It also implies that closing of the resources might not
 be immediate, as the thread processes outstanding requests.
 
-TODO Major LEET diagram
+LEET is basically organized as follows:
+
+                     +-----------------+
+                     | GUI/CLI         |
+                     +-----------------+
+
+                     +-----------------+
+           +---------+ Leet            +----------+
+           |         +--------+--------+          |
+           |                  |                   |
+LeetJob    |                  |                   |
+           |                  |                   |
+           |                  |                   |
+           v                  |                   v
+     +-----+-----+      +-----v-----+       +-----+-----+
+     | Backend a |      | Backend b |       | Backend n |
+     +-+------+--+      +--+-----+--+       +-+-------+-+
+       |      ^            |     ^            |       ^
+       |      |            |     |            |       |
+       v      |            v     |            v       |
+     +-+------+------------+-----+------------+-------+---+
+     |                                                    |
+     |  +----------+     +----------+      +----------+   |
+     |  | Plugin a |     | Plugin b |      | Pulgin n |   |
+     |  +----------+     +----------+      +----------+   |
+     |                                                    |
+     +----------------------------------------------------+
+
+Where the interface communicates with Leet, Leet request a LeetJob for the backend
+and the backend execute the specified plugin for the specified machine.
 """
 import os
 import logging
