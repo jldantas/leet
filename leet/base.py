@@ -10,19 +10,10 @@ class LeetBaseException(Exception):
     """Base class for all LeetException"""
     pass
 
-class LeetPluginException(LeetBaseException):
-    """Class for all plugin exceptions"""
-    #TODO save plugin information
-    pass
-
 class LeetPluginError(LeetBaseException):
     """Class for all plugin exceptions"""
     #TODO save plugin information
     pass
-
-# class LeetException(LeetBaseException):
-#     """Class for all exceptions outside of plugins"""
-#     pass
 
 class LeetError(LeetBaseException):
     """Main error classes that happen within leet. If a more specific error class
@@ -59,8 +50,8 @@ class _JobFSM():
     """
 
     def __init__(self, transitions_table, initial):
-         '''Creates a new _JobFSM() object. The transition table is a list of dicts
-         that contains the source state, the destination state and a trigger.
+        """Creates a new _JobFSM() object. The transition table is a list of dicts
+        that contains the source state, the destination state and a trigger.
 
         Args:
             transitions_table (list of dict): Each entry in the list has to be a dict
@@ -71,7 +62,7 @@ class _JobFSM():
 
         Returns:
             _JobFSM: New object using with the correct transition table
-        '''
+        """
         self._transitions = {}
         self.current_state = initial
         #this lock controls the change of status by the machine

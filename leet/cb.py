@@ -16,7 +16,7 @@ from cbapi.response import Process, CbResponseAPI, Sensor
 from cbapi.response.models import Sensor as CB_Sensor
 import cbapi.errors
 
-from .base import LeetJobStatus, LeetBackend, LeetException
+from .base import LeetJobStatus, LeetBackend, LeetError
 
 
 _MOD_LOGGER = logging.getLogger(__name__)
@@ -103,8 +103,6 @@ class _CB_Instance(threading.Thread):
 
     def _execute_task(self, cb_task):
         try:
-            print("****** RAISE BASE EXCEPTION ************")
-            raise Exception("test")
             with cb_task.sensor.lr_session() as session:
                 _MOD_LOGGER.debug("Session for job %s ready. Starting execution.", cb_task.leet_job.id)
                 cb_task.leet_job.executing() #TODO this can raise an exception LeetException.
@@ -117,21 +115,20 @@ class _CB_Instance(threading.Thread):
                 cb_task.leet_job.completed()
                 self._out_queue.put(_CBComms(_CBCode.FINISHED_NOTIFICATION, cb_task))
         except cbapi.errors.TimeoutError as e:
-            print("****** HANDLER 1")
             try:
                 #if we trigger this exception here, it means we tried an invalid
                 #change of status and needs to be removed from the processing list
                 self.leet_job.pending()
                 self._out_queue.put(_CBComms(_CBCode.RESCHEDULE, cb_task))
-            except LeetException as e:
+            except LeetError as e:
                 self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
-        except LeetException as e:
+        except LeetError as e:
             print("****** HANDLER 2")
             self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
-        #TODO! VERY BAD PRACTICE DETECTED. FIND A BETTER WAY TO HANDLE EXCEPTION FROM THREADPOOL
-        except Exception as e:
-            print("****** HANDLER 3")
-            print(e)
+        # #TODO! VERY BAD PRACTICE DETECTED. FIND A BETTER WAY TO HANDLE EXCEPTION FROM THREADPOOL
+        # except Exception as e:
+        #     print("****** HANDLER 3")
+        #     print(e)
 
 
     def _get_sensor_most_recent_checkin(self, sensors):

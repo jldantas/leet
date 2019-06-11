@@ -7,7 +7,7 @@ import threading, queue
 
 import leet.cb
 import leet.api
-from leet.base import LeetJob, LeetJobStatus, LeetPluginException
+from leet.base import LeetJob, LeetJobStatus, LeetPluginError
 
 import tabulate
 
@@ -107,7 +107,7 @@ class LeetTerminal(cmd.Cmd):
 
         except KeyError as e:
             print(f"Error, '{plugin_name}' is not a valid plugin")
-        except LeetPluginException as e:
+        except LeetPluginError as e:
             print("Error, plugin parameters are incorrect or missing")
 
     def do_plugin(self, args):
