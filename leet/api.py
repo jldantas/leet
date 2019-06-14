@@ -13,47 +13,41 @@ LEET is basically organized as follows:
 
                      +-----------------+
                      | GUI/CLI         |
-                     +-----------------+
-
-                     +-----------------+
-           +---------+ Leet            +----------+
-           |         +--------+--------+          |
-           |                  |                   |
-LeetJob    |                  |                   |
-           |                  |                   |
-           |                  |                   |
-           v                  |                   v
+                     +-----------------+                  +----------------+
+                                                          |  +----------+  |
+                     +-----------------+                  |  | Plugin a |  |
+                     + Leet            +------------------+  +----------+  |
+                     +---+----+--------+                  |                |
+                         ^    ^     ^                     |  +----------+  |
+LeetJob                  |    |     |                     |  | Plugin b |  |
+              +----------+    |     +-------------+       |  +----------+  |
+              |               |                   |       +----------------+
+              v               |                   v
      +-----+-----+      +-----v-----+       +-----+-----+
      | Backend a |      | Backend b |       | Backend n |
-     +-+------+--+      +--+-----+--+       +-+-------+-+
-       |      ^            |     ^            |       ^
-       |      |            |     |            |       |
-       v      |            v     |            v       |
-     +-+------+------------+-----+------------+-------+---+
-     |                                                    |
-     |  +----------+     +----------+      +----------+   |
-     |  | Plugin a |     | Plugin b |      | Pulgin n |   |
-     |  +----------+     +----------+      +----------+   |
-     |                                                    |
-     +----------------------------------------------------+
+     +-----------+      +-----------+       +-----------+
 
 Where the interface communicates with Leet, Leet request a LeetJob for the backend
 and the backend execute the specified plugin for the specified machine.
 """
-import os
-import logging
-import importlib
 import threading
-import queue
-import itertools
+import contextlib
+import concurrent.futures
 import enum
+import queue
+import logging
+import datetime
+import os
+import importlib
 
-from .base import LeetJob, LeetError
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from .base import LeetJob, LeetSearchRequest
+from .errors import  LeetError, LeetSessionError, LeetPluginError
 
 _MOD_LOGGER = logging.getLogger(__name__)
-_PLUGIN_DIR = "plugins"
 
-def _load_plugins(plugin_dir=_PLUGIN_DIR):
+def _load_plugins(plugin_dir="plugins"):
     #TODO replace for a more robust system
     """Load the plugins dynamically.
 
@@ -80,6 +74,15 @@ def _load_plugins(plugin_dir=_PLUGIN_DIR):
 
     return plugins
 
+
+    # NEW_JOB = 0x1
+    # NEW_JOBS = 0x2
+    # JOB_COMPLETED_NOTIFICATION = 0x3
+    # CANCEL_JOB = 0x4
+    #
+    # FIND_MACHINES_BACKEND = 0x6
+    # SEARCH_RESULT = 0x10
+
 class _LTControl(enum.Enum):
     """ An internal control flag to tell what the thread handling Leet should
     do. This way all interaction happens via the internal control queue, making
@@ -89,169 +92,65 @@ class _LTControl(enum.Enum):
     Control command            | Value
     =======================================
     STOP                       | None
-    NEW_JOB                    | LeetJob
+    SEARCH_BACKEND                    | LeetSearch
     NEW_JOBS                   | [LeetJob]
     JOB_COMPLETED_NOTIFICATION | LeetJob
     CANCEL_JOB                 | LeetJob
     """
     STOP = 0x0
-    NEW_JOB = 0x1
-    NEW_JOBS = 0x2
-    JOB_COMPLETED_NOTIFICATION = 0x3
-    CANCEL_JOB = 0x4
+    SEARCH_BACKEND = 0x1
+    SEARCH_READY = 0x2
+    JOB_DONE = 0x3
 
-#TODO add support to return table or save to file (csv?)
 class Leet(threading.Thread):
-    """This is the main class from LEET. It starts all control needs and
-    finds all the available plugins.
 
-    The backend is also instantiated and necessary control between backend and
-    this class is triggered. Once the instance has been started, a simple
-    call to start (coming from the Thread class) will start the main loop
-    allowing submission of tasks.
-
-    Attributes:
-        ready (bool): True or false if LEET is ready to start receiving jobs
-    """
-
-    def __init__(self, backend, plugin_dir=_PLUGIN_DIR):
-        """Creates a new Leet() object. It receives an instance of the backend
-        that will be used for communication and a path where to look for the
-        plugins.
-
+    def __init__(self, backend_list, job_notification):
+        """
         Args:
-            backend (LeetBackend*): An instance of a class that has overridden the
-                LeetBackend class
-            notify_queue (queue.Queue): NOT IMPLEMENTED, IGNORE
-            plugin_dir (string|path): A path to where the plugins are located
-
-        Returns:
-            Leet: New object
+            job_notification (Queue?): A queue or something similar that has support
+                for the method 'put(LeetJob)' and is thread safe. This is how the
+                LEET returns data to the upper levels
         """
         super().__init__(name="Thr-Leet")
-        self._plugins = None
-        self._queue = queue.SimpleQueue()
-        #TODO add support to multiple backends at the same time
-        self._backend = backend
-        self._job_list = []
-        self._completed_event = threading.Event()
-
-        self._completed_list_lock = threading.Lock()
-        self._completed_list = []
         self.ready = False
+        self._backend_list = {}
+        self._queue = queue.SimpleQueue()
+        self._plugins = None
 
-        self._backend._set_leet_control(self)
-        #TODO plugin load/reload should be independent from LEET
+        self._job_list_lock = threading.Lock()
+        self._job_list = []
+
+        self._search_timeout = datetime.timedelta(seconds=30)
+        self._sched_search = BackgroundScheduler()
+
+        self._machine_update_interval = datetime.timedelta(seconds=20)
+        self._sched_machine = BackgroundScheduler()
+
+        self._job_expiry_timeout = datetime.timedelta(days=3)
+
+        self._job_notification = job_notification
+
+        self._conf_backend(backend_list)
         self.reload_plugins()
-
-
-    @property
-    def plugin_list(self):
-        """A list of plugin names"""
-        return [name for name in self._plugins.keys()]
 
     @property
     def job_status(self):
         """A list of dictionaries with each job, its status and basic information"""
         status = []
         #acquire lock as jobs might be completed while processing
-        self._completed_list_lock.acquire()
-        for job in itertools.chain(self._job_list, self._completed_list):
-            status.append({"id" : job.id,
-                           "hostname" : job.hostname,
-                           "plugin": job.plugin_instance.LEET_PG_NAME,
-                           "status" : job.status})
-        self._completed_list_lock.release()
+        with self._job_list_lock:
+            for job in self._job_list:
+                status.append({"id" : job.id,
+                               "hostname" : job.machine.hostname,
+                               "plugin": job.plugin_instance.LEET_PG_NAME,
+                               "status" : job.status})
 
         return status
 
-    def _set_finished_job(self, leet_job):
-        """Internal function that moves a job from the "general" list to a
-        completed job list, garanting right lock usage
-        """
-        self._completed_list_lock.acquire()
-        self._job_list.remove(leet_job)
-        self._completed_list.append(leet_job)
-        self._completed_list_lock.release()
-
-    def _notifyjob(self, job):
-        """An internal function called by the LeetBackend to notify a job has
-        been completed.
-
-        Args:
-            job (LeetJob): The LeetJob that was completed.
-        """
-        self._queue.put((_LTControl.JOB_COMPLETED_NOTIFICATION, job))
-
-    def run(self):
-        """Starts LEET and all backend connections, making LEET ready to be
-        interacted with.
-        """
-        with self._backend.start() as backend:
-            self.ready = True
-            while True:
-                # try:
-                    #code, value = in_queue.get(timeout=10)
-                code, value = self._queue.get()
-                _MOD_LOGGER.debug("Received request for '%s'", code)
-                if code == _LTControl.STOP:
-                    break
-                elif code == _LTControl.NEW_JOBS:
-                    backend.add_tasks(value)
-                    self._job_list += value
-                elif code == _LTControl.NEW_JOB:
-                    backend.add_task(value)
-                    self._job_list.append(value)
-                elif code == _LTControl.JOB_COMPLETED_NOTIFICATION:
-                    self._set_finished_job(value)
-                    self._completed_event.set()
-                elif code == _LTControl.CANCEL_JOB:
-                    #TODO handle if the job does not exists
-                    #TODO handle error if a completed job is requested to be cancelled (LeetError)
-                    value.cancel()
-                    backend.cancel_task(value)
-                else:
-                    raise LeetError(f"No internal handling code for {code}.")
-
-                # except queue.Empty as e:
-                #     f_tasks = lt_cb.pop_finished_tasks()
-                #     tasks += f_tasks
-
-    #TODO bind all public methods to check if the backend is ready?
-    def wait_until_completed_job(self, timeout=None):
-        """Wait until a job is completed. If there are no completed jobs, the call
-        will block. If there are any completed jobs, it will not block.
-
-        If the interface has a particular thread waiting to be informed about completed
-        jobs, it should call this function and block. Once the results have been
-        returned, it can wait once again.
-
-        Returns:
-            (bool): True if there are completed jobs or False if there are none. Note
-                False is only returned if timeout is provided and it actually times out.
-                Otherwise, it will block until something happens.
-        """
-        wait_result = self._completed_event.wait(timeout)
-        self._completed_event.clear()
-        
-        return wait_result
-
-    def return_completed_jobs(self):
-        """This will return the completed jobs AND remove from the internal control.
-        Right now this is the only function that will remove jobs from leet,
-        freeing memory and should be consistently called by the interface.
-
-        Returns:
-            [LeetJobs]: A list of LeetJobs that have been finished
-        Returns a list of LeetJobs
-        """
-        self._completed_list_lock.acquire()
-        temp_list = self._completed_list
-        self._completed_list = []
-        self._completed_list_lock.release()
-        self._completed_event.clear()
-
-        return temp_list
+    @property
+    def plugin_list(self):
+        """A list of plugin names"""
+        return [name for name in self._plugins.keys()]
 
     def reload_plugins(self):
         """Forces a plugin reload"""
@@ -272,65 +171,189 @@ class Leet(threading.Thread):
         """
         return self._plugins[plugin_name].LeetPlugin()
 
-    def start_job_single_machine(self, hostname, plugin):
-        """Start a job for a single machine.
+    def _conf_backend(self, backend_list):
+        for backend in backend_list:
+            _MOD_LOGGER.debug("Linking backend %s and allocating resources.", backend.backend_name)
+            backend.leet = self
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=backend.max_sessions, thread_name_prefix="Thr-" + backend.backend_name + "sessions")
+            self._backend_list[backend.backend_name] = (backend, pool)
 
-        Args:
-            hostname (str): The target machine name
-            plugin (LeetPlugin*): The plugin instance that will be executed
+    def notify_search_completed(self, search_request):
+        """Notifies a search has been completed.
+
+        Should be called by the backend only.
         """
+        self._queue.put((_LTControl.SEARCH_READY, search_request))
+
+    def run(self):
+
+        with contextlib.ExitStack() as stack:
+            self._sched_machine.start()
+            self._sched_search.start()
+            _MOD_LOGGER.debug("Starting all backends")
+            for backend, pool in self._backend_list.values():
+                stack.enter_context(backend)
+            self.ready = True
+            #TODO this look ugly, redo
+            backend_quantity = len(self._backend_list)
+
+            while True:
+                code, value = self._queue.get()
+                _MOD_LOGGER.debug("Processing internal command '%s'", code)
+                if code == _LTControl.STOP:
+                    break
+                elif code == _LTControl.SEARCH_BACKEND:
+                    value.backend_quantity = backend_quantity
+                    for backend, t_pool in self._backend_list.values():
+                        backend.search_machines(value)
+                    next_exec = datetime.datetime.now() + self._search_timeout
+                    self._sched_search.add_job(self._expire_search, 'date', run_date=next_exec, args=[value], id=str(value.id))
+                elif code == _LTControl.SEARCH_READY:
+                    self._search_ready(value)
+                elif code == _LTControl.JOB_DONE:
+                    self._remove_job(value)
+                    self._job_notification.put(value)
+
+    def _search_ready(self, search_request):
+        _MOD_LOGGER.debug("Search finished. Took %s secs.", search_request.end_time - search_request.start_time)
+
+        f_machines = set()
+
+        #TODO solve conflicts
+        for machine in search_request._found_machines:
+            f_machines.add(machine.hostname)
+            _MOD_LOGGER.info("Adding job for machine %s", machine.hostname)
+            self._add_job(LeetJob(machine, search_request.plugin))
+            #self._sched_machine.add_job(self._is_machine_ready, 'date', args=[LeetJob(machine, search_request.plugin)])
+        if len(search_request.hostnames) > len(f_machines):
+            _MOD_LOGGER.info("The following machines were not found and will be ignored: %s", [h for h in search_request.hostnames if h not in f_machines])
+
+    def _add_job(self, leet_job):
+        with self._job_list_lock:
+            self._job_list.append(leet_job)
+            self._sched_machine.add_job(self._is_machine_ready, 'date', args=[leet_job])
+
+    def _remove_job(self, leet_job):
+        with self._job_list_lock:
+            self._job_list.remove(leet_job)
+
+    def _execute_plugin(self, leet_job):
+        try:
+            with leet_job.machine.connect() as session:
+                _MOD_LOGGER.debug("Session for job %s ready. Starting execution.", leet_job.id)
+                leet_job.executing()
+                leet_job.plugin_result = leet_job.plugin_instance.run(session, leet_job.machine)
+                leet_job.completed()
+                _MOD_LOGGER.debug("Job %s was successful.", leet_job.id)
+                self._queue.put((_LTControl.JOB_DONE, leet_job))
+        except LeetSessionError as e:
+            if not e.stop:
+                _MOD_LOGGER.debug("Job %s failed. Error: %s", leet_job.id, str(e))
+                leet_job.pending()
+                _MOD_LOGGER.debug("Rescheduling Job %s", leet_job.id)
+                self._is_machine_ready(leet_job)
+            else: #if this is a critial session error, let's remove the job from processing
+                self._queue.put((_LTControl.JOB_DONE, leet_job))
+        except LeetPluginError as e:
+            _MOD_LOGGER.debug("Job %s failed. Error in plugin execution", leet_job.id)
+            _MOD_LOGGER.exception(e)
+            leet_job.error()
+            self._queue.put((_LTControl.JOB_DONE, leet_job))
+
+
+            # try:
+            #     with cb_task.sensor.lr_session() as session:
+            #         _MOD_LOGGER.debug("Session for job %s ready. Starting execution.", cb_task.leet_job.id)
+            #         cb_task.leet_job.executing() #TODO this can raise an exception LeetException.
+            #         results = cb_task.leet_job.plugin_instance.run(session, cb_task.leet_job.hostname)
+            #         if results.success:
+            #             cb_task.leet_job.plugin_result = results
+            #             _MOD_LOGGER.debug("Job %s was successful.", cb_task.leet_job.id)
+            #         else:
+            #             _MOD_LOGGER.debug("Job %s failed.", cb_task.leet_job.id)
+            #         cb_task.leet_job.completed()
+            #         self._out_queue.put(_CBComms(_CBCode.FINISHED_NOTIFICATION, cb_task))
+            # except cbapi.errors.TimeoutError as e:
+            #     try:
+            #         #if we trigger this exception here, it means we tried an invalid
+            #         #change of status and needs to be removed from the processing list
+            #         self.leet_job.pending()
+            #         self._out_queue.put(_CBComms(_CBCode.RESCHEDULE, cb_task))
+            #     except LeetError as e:
+            #         self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
+            # except cbapi.live_response_api.LiveResponseError as e:
+            #     _MOD_LOGGER.exception(e)
+            #     cb_task.leet_job.error()
+            #     self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
+            # except LeetError as e:
+            #     #print("****** HANDLER 2")
+            #     _MOD_LOGGER.exception(e)
+            #     cb_task.leet_job.error()
+            #     self._out_queue.put(_CBComms(_CBCode.REMOVE_FROM_LIST, cb_task))
+            # # #TODO! VERY BAD PRACTICE DETECTED. FIND A BETTER WAY TO HANDLE EXCEPTION FROM THREADPOOL
+            # except Exception as e:
+            #     print("****** HANDLER 3")
+            #     _MOD_LOGGER.exception(e)
+            #     print(e)
+
+    def _handle_errors(self, result):
+        #TODO, obviously
+        result.result()
+
+    def _expire_search(self, search_request):
+        #if the search is ready, just let it be removed by the scheduler.
+        if not search_request.ready:
+            _MOD_LOGGER.warning("Search %s expired. Running the jobs with what we have", search_request.id)
+            #TODO more info on what completed and what expired
+            search_request.ready = True
+            self.notify_search_completed(search_request)
+        else:
+            _MOD_LOGGER.warning("Search %s has been completed, remove from schedule", search_request.id)
+
+
+    def _can_reschedule_job(self, leet_job):
+        expiry_time = leet_job.start_time + self._job_expiry_timeout
+        if leet_job.status != LeetJobStatus.CANCELLED and datetime.datetime.utcnow() < expiry_time:
+            return True
+        else:
+            return False
+
+    def _is_machine_ready(self, leet_job):
+        leet_job.machine.refresh()
+        if leet_job.machine.can_connect:
+            _MOD_LOGGER.debug("Machine for job %s is Online. Attempting connection.", leet_job.id)
+            job = self._backend_list[leet_job.machine.backend_name][1].submit(self._execute_plugin, leet_job)
+            job.add_done_callback(self._handle_errors)
+        else:
+            if _can_reschedule_job(leet_job):
+                _MOD_LOGGER.debug("Machine for job %s is Offline. Rescheduling", leet_job.id)
+                next_exec = datetime.datetime.now() + self._machine_update_interval
+                self._sched.add_job(self._is_machine_ready, 'date', run_date=next_exec, args=[leet_job])
+            else:
+                _MOD_LOGGER.debug("Job %s has been cancelled or timed out. Removing.", leet_job.id)
+                #TODO change job status in case it has not been cancelled. Timeout status?
+                self._queue.put((_LTControl.JOB_DONE, leet_job))
+
+    def schedule_jobs(self, plugin, hostnames):
+        """plugin instance
+        list of hostnames"""
         plugin.check_param()
-        self._queue.put((_LTControl.NEW_JOB, LeetJob(hostname, plugin)))
+        search_request = LeetSearchRequest(hostnames, plugin)
+        _MOD_LOGGER.debug("Scheduling jobs for %i machines", len(hostnames))
+        self._queue.put((_LTControl.SEARCH_BACKEND, search_request))
 
-    def start_jobs(self, hostnames, plugin):
-        """Start a job for a list of machines
-
-        Args:
-            hostnames (list of str): A list of targer machine names
-            plugin (LeetPlugin*): The plugin instance that will be executed
-        """
-        plugin.check_param()
-        _MOD_LOGGER.debug("Requesting jobs for %i machines", len(hostnames))
-        self._queue.put((_LTControl.NEW_JOBS, [LeetJob(hostname, plugin) for hostname in hostnames]))
-
-    def cancel_job(self, job):
-        """Cancel a job.
-
-        Args:
-            job (LeetJob): A instance of LeetJob that will be cancelled.
-        """
-        self._queue.put((_LTControl.CANCEL_JOB, job))
-
-    def cancel_by_id(self, job_id):
-        """Cancel a job by id.
-
-        Args:
-            job_id (UUID): The ID of the job that should be cancelled.
-
-        Raises:
-            KeyError: In case the ID does not exists
-        """
-        #TODO replace error for LeetError?
-        self.cancel_job(self._job_list[job_id])
-
-    def cancel_all_jobs(self):
-        """Cancel all jobs."""
-        for job in self._job_list:
-            self.cancel_job(job)
-
-    def close(self):
+    def shutdown(self):
         """Stop the execution of Leet and free all the resources, including the
         backend resources."""
-        self.ready = False
-        self._queue.put((_LTControl.STOP, None))
-        self._completed_event.set()
-        #self.
+        if self.ready:
+            self.ready = False
+            _MOD_LOGGER.debug("Requesting all threads to close")
+            self._queue.put((_LTControl.STOP, None))
+            _MOD_LOGGER.debug("Closing backend threads")
+            for backend, thread_pool in self._backend_list.values():
+                backend.shutdown()
+                thread_pool.shutdown()
 
-    def __enter__(self):
-        """Context enter"""
-        return self
-
-    def __exit__(self, exeception_type, exception_value, traceback):
-        """Context exit"""
-        #print(exeception_type, exception_value, traceback)
-        self.close()
+            _MOD_LOGGER.debug("Closing scheduler threads")
+            self._sched_machine.shutdown()
+            self._sched_search.shutdown()

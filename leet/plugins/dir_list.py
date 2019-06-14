@@ -1,6 +1,6 @@
 from datetime import datetime as _datetime
 
-from leet.base import PluginBase, PluginResult, LeetPluginParameter
+from leet.base import PluginBase, LeetPluginParameter
 
 
 class LeetPlugin(PluginBase):
@@ -14,9 +14,9 @@ class LeetPlugin(PluginBase):
 
 
     def run(self, session, hostname):
-        result = PluginResult()
+        data = []
 
-        result.headers = ["Access ts", "Write ts", "Created ts", "Filename", "Size", "Attributes"]
+        #result.headers = ["Access ts", "Write ts", "Created ts", "Filename", "Size", "Attributes"]
         temp_data = session.list_directory(self.get_param("path"))
         for item in temp_data:
             data_processed = {"Access ts" : _datetime.utcfromtimestamp(item["last_access_time"]),
@@ -25,11 +25,10 @@ class LeetPlugin(PluginBase):
                                 "Filename" : item["filename"],
                                 "Attributes" : "|".join(item["attributes"]),
                                 "Size" : item["size"]}
-            result.data.append(data_processed)
+            data.append(data_processed)
 
-        result.success = True
 
-        return result
+        return data
 
 # Sample return of a CB dirlist
 # {'last_access_time': 1458169329, 'last_write_time': 1458169329, 'filename': '$Recycle.Bin', 'create_time': 1247541536, 'attributes': ['HIDDEN', 'SYSTEM', 'DIRECTORY'], 'size': 0},

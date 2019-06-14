@@ -2,23 +2,12 @@
 import uuid
 import enum
 import abc
-import collections
-import copy
 import threading
+import queue
+import datetime
+import logging
 
-class LeetBaseException(Exception):
-    """Base class for all LeetException"""
-    pass
-
-class LeetPluginError(LeetBaseException):
-    """Class for all plugin exceptions"""
-    #TODO save plugin information
-    pass
-
-class LeetError(LeetBaseException):
-    """Main error classes that happen within leet. If a more specific error class
-    has been defined, it will be used."""
-    pass
+_MOD_LOGGER = logging.getLogger(__name__)
 
 class LeetJobStatus(enum.Enum):
     '''Flags the status of an individual job.
@@ -38,6 +27,202 @@ class LeetJobStatus(enum.Enum):
     CANCELLED = 0x3
     ERROR = 0x4
 
+class LeetSOType(enum.Enum):
+    WINDOWS = 0x1
+    LINUX = 0x2
+    MAC = 0x3
+    UNKNOWN = 0X10
+
+class LeetMachine(metaclass=abc.ABCMeta):
+    def __init__(self, hostname, backend_name):
+        self.hostname = hostname
+        self.can_connect = False
+        self.so_type = LeetSOType.UNKNOWN
+        self.drive_list = None
+        self.backend_name = backend_name
+
+    @abc.abstractmethod
+    def refresh(self):
+        """Refresh the status of the machine and updates can_connect attribute"""
+
+    @abc.abstractmethod
+    def connect(self):
+        """Start the session with the machine, it has to return a LeetSession subclass"""
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return (f'{self.__class__.__name__}(hostname={self.hostname}, '
+                f'can_connect={self.can_connect}, so_type={self.so_type}, '
+                f'drive_list={self.drive_list})'
+               )
+
+class LeetSession(metaclass=abc.ABCMeta):
+    """You can use the raw_session directly, but the plugin will get bound to
+    a particular backend and leet does not check for this.
+    """
+    def __init__(self, session, machine_info):
+        self.raw_session = session
+
+        if machine_info.so_type == LeetSOType.WINDOWS:
+            self.path_separator = "\\"
+        #TODO in case of unknow, should we throw an error?
+        else:
+            self.path_separator = "/"
+
+    @abc.abstractmethod
+    def list_processes(self):
+        """Returns a list of processes currently executing on the machine.
+
+        Returns:
+            (list of dicts): A list of dicts where each entry on the list represents
+                a process and each dictionary MUST have the following format:
+                {"username" (str): Username the process is executing,
+                 "pid" (int): The process ID,
+                 "ppid" (int): The parent process ID,
+                 "start_time" (datetime): The date and time, in UTC, that the process started,
+                 "command_line" (str): The commandline used to start the process,
+                 "path" (str): The path of the executable}
+
+            For example:
+            [{"username": "NT AUTHORITY\\SYSTEM",
+            "ppid": 644,
+            "pid": 856,
+            "command_line": 'svchost.exe -k dcomlaunch -p -s PlugPlay',
+            "start_time": datetime.datetime(2019-05-01 13:00:00),
+            "path": "c:\\windows\\system32\\svchost.exe",
+            }]
+        """
+
+    @abc.abstractmethod
+    def get_file(self, remote_file_path):
+        """Returns the contents of a remote file. The file will be completed
+        loaded in memory. There is NO guarantee it will work for locked files.
+
+        This request must block until the whole file has been read.
+
+        Args:
+            remove_file_path (str): The absolute path on the remote machine.
+            timeout (int): In seconds
+
+        Returns:
+            (binary content): The contents of the file, as read
+        """
+        #TODO should we require the session backend returns any file, including locked ones?
+
+    @abc.abstractmethod
+    def put_file(self, fp, remote_file_path, overwrite):
+        """Transfer a file to the remote machine.
+
+        Args:
+            fp (file like object): A file like object with the data
+            remote_file_path (str): Absolute path where the file will be saved
+            overwrite (bool): If the it is True, it will overwrite the file.
+
+        Returns:
+            None
+
+        Raises:
+            (LeetCommandError): If the file exists and the overwrite is set to False,
+                or the path does not exists.
+        """
+
+    @abc.abstractmethod
+    def delete_file(self, remote_file_path):
+        """Delete a file from the remote machine.
+
+        Args:
+            remote_file_path (str): File path of the file to be deleted.
+
+        Returns:
+            None
+
+        Raises:
+            (LeetCommandError): If the file doesn't exists, if the file is locked
+                by the OS.
+        """
+
+    @abc.abstractmethod
+    def exists(self, remote_file_path):
+        """Checks if a path or file exist.
+
+        Args:
+            remote_file_path (str): File path to be checked.
+
+        Returns:
+            (bool): True if it exists, False otherwise
+        """
+
+    @abc.abstractmethod
+    def start_process(self, cmd_string, cwd="", background=False):
+        """
+
+        Returns:
+            (str): If the command is not executed on the background,
+                returns the command output as a string
+            (None): If the the process is marked to start in the background
+        """
+
+    @abc.abstractmethod
+    def __enter__(self):
+        """Enter context"""
+
+    @abc.abstractmethod
+    def __exit__(self, exeception_type, exception_value, traceback):
+        """Exit context"""
+
+
+class LeetSearchRequest():
+    def __init__(self, hostnames, plugin, backend_numbers=0):
+        self.id = uuid.uuid4()
+        self.start_time = datetime.datetime.utcnow()
+        self.end_time = None
+        self.hostnames = hostnames
+        self.plugin = plugin
+        self.ready = False
+
+        self.backend_quantity = backend_numbers
+
+        self._completed_backends = set()
+        self._change_lock = threading.RLock()
+
+        self._found_machines = []
+        #TODO do we need two locks?
+        self._machine_lock = threading.RLock()
+
+    @property
+    def found_machines(self):
+        """Stores all the machines found on the search, by backend."""
+        return self._found_machines
+
+    def add_completed_backend(self, backend_name):
+        if not self.ready:
+            self._change_lock.acquire()
+            self._completed_backends.add(backend_name)
+            if len(self._completed_backends) >= self.backend_quantity:
+                self.end_time = datetime.datetime.utcnow()
+                self.ready = True
+            self._change_lock.release()
+
+    def add_found_machines(self, machine_list):
+        if not self.ready:
+            self._machine_lock.acquire()
+            self._found_machines += machine_list
+            self._machine_lock.release()
+
+
+    def __eq__(self, other):
+        if isinstance(other, LeetJob):
+            return self.id == other.id
+        else:
+            return False
+
+    def __repr__(self):
+        'Return a nicely formatted representation string'
+        return (f'{self.__class__.__name__}(id={self.id}, '
+                f'start_time={self.start_time}, end_time={self.end_time}, '
+                f'hostnames={self.hostnames}, plugin={self.plugin}, '
+                f'completed_backends={self._completed_backends})'
+               )
 
 class _JobFSM():
     """A very, very, very simplified state machine used to control how a job
@@ -116,26 +301,26 @@ class LeetJob():
 
     Attributes:
         id (UUID): ID of the job. Should not be manually set or changed at any point
-        hostname (string): The name of the machine where the plugin will be executed
+        machine (string): The name of the machine where the plugin will be executed
         plugin_result (PluginResult): Where the result of the plugin execution will
             be stored
         plugin_instance (PluginBase*): An instance of any class that implements 'PluginBase'.
     """
 
-    def __init__(self, hostname, plugin_instance):
+    def __init__(self, machine, plugin_instance):
         """Creates a new LeetJob() object. Receives the name of the host and the
         plugin instance.
 
         Args:
-            hostname (string): The name of the machine
+            machine (string): The name of the machine
             plugin_instance (PluginBase*):  An instance of any class that implements 'PluginBase'.
 
         Returns:
             LeetJob: New object representing the job.
         """
         self.id = uuid.uuid4()
-        #TODO potentially change from hostname to machine information, with things like SO, SO version, list of drives, etc.
-        self.hostname = hostname
+        self.machine = machine
+        self.start_time = datetime.datetime.utcnow()
         self.plugin_result = None
         self.plugin_instance = plugin_instance
         self._status_machine = None
@@ -154,13 +339,23 @@ class LeetJob():
         """
         #TODO having a machine per job is wasteful. It is the same machine for all jobs,
         #replace this for a single machine for all jobs.
+        # two special cases of note:
+        #   pending to pending -> a job can go from pending to pending, by itself,
+        #       it is already in the state so there is no issue
+        #   cancelled receiving executin keeps in the same state:
+        #       if a job has been cancelled while LEET is trying to connect, it
+        #       is a waste to just drop the connection, as such, we keep in cancelled
+        #       and if the job is successful, just move it to finished.
+        #TODO I don't like the last statement
         t = [
+            {"trigger" : "pending", "source" : LeetJobStatus.PENDING, "dest" : LeetJobStatus.PENDING},
             {"trigger" : "executing", "source" : LeetJobStatus.PENDING, "dest" : LeetJobStatus.EXECUTING},
             {"trigger" : "cancel", "source" : LeetJobStatus.PENDING, "dest" : LeetJobStatus.CANCELLED},
             {"trigger" : "pending", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.PENDING},
             {"trigger" : "cancel", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.CANCELLED},
             {"trigger" : "completed", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.COMPLETED},
             {"trigger" : "completed", "source" : LeetJobStatus.CANCELLED, "dest" : LeetJobStatus.COMPLETED},
+            {"trigger" : "executing", "source" : LeetJobStatus.CANCELLED, "dest" : LeetJobStatus.CANCELLED},
             {"trigger" : "error", "source" : LeetJobStatus.EXECUTING, "dest" : LeetJobStatus.ERROR},
             {"trigger" : "error", "source" : LeetJobStatus.PENDING, "dest" : LeetJobStatus.ERROR}
         ]
@@ -215,78 +410,140 @@ class LeetJob():
     def __repr__(self):
         'Return a nicely formatted representation string'
         return (f'{self.__class__.__name__}(id={self.id}, '
-                f'hostname={self.hostname}, status={self.status}, '
+                f'machine={self.machine}, status={self.status}, '
                 f'plugin_result={self.plugin_result}, plugin_instance={self.plugin_instance})'
                )
 
+class _BackendControl(enum.Enum):
+    STOP = 0x0
+    SEARCH = 0x1
+
 class LeetBackend(metaclass=abc.ABCMeta):
-    #TODO interface with plugin should be pushed to this class?
-    """The main class for all backend implementations.
+    def __init__(self, backend_name, max_sessions):
+        self.backend_name = backend_name
+        self.max_sessions = max_sessions
+        #change this to to a threadpool?
+        self._monitor_thread = threading.Thread(target=self._monitor_queue, name="Thr-" + backend_name)
+        self._queue = queue.Queue()
+        self.leet = None
 
-    The backend is responsible for establishing a session with the machine/endpoint.
-    This might take as many steps as necessary, for example, verify if the machine
-    is online, connecting to the machine and should happen in a non-blocking way.
-
-    The backend is also required to move the job to the correct status when necessary,
-    interface with the plugin, sending the correct parameters, getting the result
-    and properly understanding if the plugin executed correctly or not.
-
-    It is also required to support context manager and make sure any resources are
-    correctly closed.
-
-    Attributes:
-        LEET_BACKEND (string): The name of the backend. Should be unique for all
-            backends.
-    """
-
-    def __init__(self, leet_backend_name):
-        """Creates a new LeetBackend object. Receives the name of the backend.
-        As a metaclass, it can't be instantiated by itself.
-
-        Args:
-            leet_backend_name (string): The name of the backend
-
-        Returns:
-            LeetBackend: New object representing the job.
-        """
-        self.LEET_BACKEND = leet_backend_name
-        self._leet_control = None
-
-    def notify_job_completed(self, job):
-        """Should be called by the backend implementation when a job has been
-        completed. This will push the notification back to the API to allow correct
-        processing.
-
-        Args:
-            job (LeetJob): The LeetJob that has been completed.
-        """
-        self._leet_control._notifyjob(job)
-
-    @abc.abstractmethod
-    def close(self):
-        """Closes/Stops all the backend resources"""
-
-    @abc.abstractmethod
     def start(self):
-        """Allocate all the necessary resources to allow the backend to start"""
+        """If overloaded, needs to call parent and return self"""
+        self._monitor_thread.start()
+
+        return self
+
+    def shutdown(self):
+        """If overloaded, needs to call parent"""
+        self._queue.put((_BackendControl.STOP, None))
+        self._monitor_thread.join()
+
+    def search_machines(self, search_request):
+        self._queue.put((_BackendControl.SEARCH, search_request))
+
+    def _monitor_queue(self):
+        while True:
+            code, value = self._queue.get()
+            if code == _BackendControl.STOP:
+                break
+            elif code == _BackendControl.SEARCH:
+                search_request = value
+                machines = self._search_machines(search_request)
+                _MOD_LOGGER.debug("Search finished. %d/%d found in this instance.", len(machines), len(search_request.hostnames))
+                search_request.add_found_machines(machines)
+                search_request.add_completed_backend(self.backend_name)
+                _MOD_LOGGER.debug("Backend '%s' has finished searching.", self.backend_name)
+                if search_request.ready:
+                    _MOD_LOGGER.debug("Search is ready, sending notification")
+                    self.leet.notify_search_completed(search_request)
+
+            else:
+                #TODO raise error
+                pass
+
+            self._queue.task_done()
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, exeception_type, exception_value, traceback):
+        #print(exeception_type, exception_value, traceback)
+        self.shutdown()
 
     @abc.abstractmethod
-    def add_task(self, task):
-        """Must receive a LeetJob"""
+    def _search_machines(self, search_request):
+        """Needs to be overloaded"""
 
-    @abc.abstractmethod
-    def add_tasks(self, tasks):
-        """Must receive a list of LeetJob"""
 
-    @abc.abstractmethod
-    def cancel_task(self, task):
-        """Must receive a LeetJob"""
 
-    def _set_leet_control(self, leet_control):
-        """Is called internally to link the Leet parent class with the backend,
-        so communication can flow. Should be called only from the contructor of
-        the api.Leet class."""
-        self._leet_control = leet_control
+# class LeetBackend(metaclass=abc.ABCMeta):
+#     #TODO interface with plugin should be pushed to this class?
+#     """The main class for all backend implementations.
+#
+#     The backend is responsible for establishing a session with the machine/endpoint.
+#     This might take as many steps as necessary, for example, verify if the machine
+#     is online, connecting to the machine and should happen in a non-blocking way.
+#
+#     The backend is also required to move the job to the correct status when necessary,
+#     interface with the plugin, sending the correct parameters, getting the result
+#     and properly understanding if the plugin executed correctly or not.
+#
+#     It is also required to support context manager and make sure any resources are
+#     correctly closed.
+#
+#     Attributes:
+#         LEET_BACKEND (string): The name of the backend. Should be unique for all
+#             backends.
+#     """
+#
+#     def __init__(self, leet_backend_name):
+#         """Creates a new LeetBackend object. Receives the name of the backend.
+#         As a metaclass, it can't be instantiated by itself.
+#
+#         Args:
+#             leet_backend_name (string): The name of the backend
+#
+#         Returns:
+#             LeetBackend: New object representing the job.
+#         """
+#         self.LEET_BACKEND = leet_backend_name
+#         self._leet_control = None
+#
+#     def notify_job_completed(self, job):
+#         """Should be called by the backend implementation when a job has been
+#         completed. This will push the notification back to the API to allow correct
+#         processing.
+#
+#         Args:
+#             job (LeetJob): The LeetJob that has been completed.
+#         """
+#         self._leet_control._notifyjob(job)
+#
+#     @abc.abstractmethod
+#     def close(self):
+#         """Closes/Stops all the backend resources"""
+#
+#     @abc.abstractmethod
+#     def start(self):
+#         """Allocate all the necessary resources to allow the backend to start"""
+#
+#     @abc.abstractmethod
+#     def add_task(self, task):
+#         """Must receive a LeetJob"""
+#
+#     @abc.abstractmethod
+#     def add_tasks(self, tasks):
+#         """Must receive a list of LeetJob"""
+#
+#     @abc.abstractmethod
+#     def cancel_task(self, task):
+#         """Must receive a LeetJob"""
+#
+#     def _set_leet_control(self, leet_control):
+#         """Is called internally to link the Leet parent class with the backend,
+#         so communication can flow. Should be called only from the contructor of
+#         the api.Leet class."""
+#         self._leet_control = leet_control
 
 ##############################################################################
 # Plugin basic data class section
@@ -499,47 +756,23 @@ class PluginBase(metaclass=abc.ABCMeta):
             hostname (str): The hostname where the plugin is executing.
 
         Returns:
-            PluginResult: The result of the plugin.
+            (list of dict): All the dicts should have the same keys, as the
+                results will be passed to the user interface. For anything other
+                than that, the plugin MUST implement what is necessary, including
+                error handling.
+
+            Example:
+                data = [{"file name": "example.txt", size: "123"},
+                        {"file name": "super.txt", size: "567"}]
+
+        Raises:
+            LeetPluginError: In case of any errors during the execution
+                of the plugin
         """
-        #TODO define the session interface to decouple from the backend
 
     def __repr__(self):
         'Return a nicely formatted representation string'
         return (f'{self.__class__.__name__}(name={self.LEET_PG_NAME}, '
                 f'description={self.LEET_PG_DESCRIPTION}, '
                 f'_ltpg_param={self._ltpg_param})'
-               )
-
-class PluginResult():
-    """Represents the result of a plugin execution. A plugin MUST return an
-    instance of this class.
-
-    The results will be passed to the user interface or dumped in a csv like
-    file. For anything other than that, the plugin MUST implement what is
-    necessary, including error handling.
-
-    Attributes:
-        success (bool): If the plugin execution was sucessful or not
-        header (list of strings): A list of string containing the headers of the
-            information returned by the plugin
-        data (list of dicts): A list of dict, where each dict entry has the as its
-            keys the same as the header.
-
-    Example:
-        headers = ["file name", size]
-        data = [{"file name": "example.txt", size: "123"},
-                {"file name": "super.txt", size: "567"}]
-        PluginResult(True, headers, data)
-    """
-
-    #TODO Better define the interface.
-    def __init__(self, success=False, headers=[], data=[]):
-        self.success = success
-        self.headers = headers
-        self.data = data
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return (f'{self.__class__.__name__}(success={self.success}, '
-                f'headers={self.headers}, data={self.data})'
                )
