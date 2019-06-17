@@ -11,7 +11,7 @@ class LeetPlugin(PluginBase):
         super().__init__()
         self.arg_parser.add_argument("--path", help="Path to be listed on the remote endpoint", required=True)
 
-    def run(self, session, hostname):
+    def run(self, session, machine_info):
         data = []
 
         #result.headers = ["Access ts", "Write ts", "Created ts", "Filename", "Size", "Attributes"]

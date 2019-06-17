@@ -238,13 +238,13 @@ class LeetTerminal(cmd.Cmd):
         print("The job(s) will be sent for processing.")
         confirm = input("Confirm? (y/n) ")
         if confirm.strip().lower() == "y":
-            self._leet.start_jobs(self.hostname_list, self.plugin)
+            self._leet.schedule_jobs(self.plugin, self.hostname_list)
             print("Job scheduled. Cleaning parameters.")
             self.hostname_list = None
             self.plugin = None
         else:
             print("Job cancelled.")
-        
+
 
     def do_show(self, args):
         completed_jobs = self._leet.return_completed_jobs()
@@ -327,9 +327,9 @@ class LeetTerminal(cmd.Cmd):
 
 
 def main():
-    cli = LeetTerminal()
+    #cli = LeetTerminal()
 
-    with LeetTerminal() as cli:
+    with LeetTerminal(["all"]) as cli:
             cli.cmdloop()
 
     # try:
