@@ -205,10 +205,8 @@ class LeetSearchRequest():
 
     def add_found_machines(self, machine_list):
         if not self.ready:
-            self._machine_lock.acquire()
-            self._found_machines += machine_list
-            self._machine_lock.release()
-
+            with self._machine_lock:
+                self._found_machines += machine_list
 
     def __eq__(self, other):
         if isinstance(other, LeetJob):
