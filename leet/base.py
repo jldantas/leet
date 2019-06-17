@@ -6,6 +6,7 @@ import threading
 import queue
 import datetime
 import logging
+import argparse
 
 _MOD_LOGGER = logging.getLogger(__name__)
 
@@ -630,9 +631,10 @@ class LeetBackend(metaclass=abc.ABCMeta):
 # Plugin basic data class section
 ##############################################################################
 
-import argparse
-
 class LeetPluginParser(argparse.ArgumentParser):
+    """A very simple extension of the standard ArgumentParser, so in case
+    of errors we actually trigger an exception.
+    """
     def error(self, message):
         raise LeetPluginError(message)
 

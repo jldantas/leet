@@ -1,4 +1,3 @@
-import argparse
 from datetime import datetime as _datetime
 
 from leet.base import PluginBase, LeetPluginParser

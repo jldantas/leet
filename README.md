@@ -53,7 +53,6 @@ Not in a particular order of importance.
 - Add the ability of executing "routines", e.g., a group of plugins, in order
 - CLI should also read a job file and configure itself properly
 - Find a way to efficiently handle errors from threadpools (cb backend)
-- Bubble the error from the plugin/backend to the api
 - Save jobs to continue later
 
 ## Features
@@ -71,6 +70,7 @@ do it's best to execute whatever was requested.
 - Multiple backends at the same time are supported
 - Simplified communication with the user interface
 - Code restructuring
+- Changed plugin arguments to be based in the argparse module
 
 ### 0.1
 
