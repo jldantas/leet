@@ -165,17 +165,16 @@ class LeetTerminal(cmd.Cmd):
 
         try:
             plugin = self._leet.get_plugin(plugin_name)
-            parameter_dict = {k:v for k,v in pairwise(parameters)}
-            #validate the plugin in the most simple way
-            plugin.set_param(parameter_dict)
-            plugin.check_param()
+            plugin.parse_parameters(parameters)
+            # parameter_dict = {k:v for k,v in pairwise(parameters)}
+            # #validate the plugin in the most simple way
+            # plugin.set_param(parameter_dict)
+            # plugin.check_param()
 
             self.plugin = plugin
 
-        except KeyError as e:
-            print(f"Error, '{plugin_name}' is not a valid plugin")
         except LeetPluginError as e:
-            print("Error, plugin parameters are incorrect or missing")
+            print(str(e))
 
     def do_plugin(self, args):
         """plugin plugin_name [parameters]
@@ -187,6 +186,7 @@ class LeetTerminal(cmd.Cmd):
         lex_parser = shlex.shlex(args.strip(), posix=True)
         lex_parser.whitespace += "="
         lex_parser.escapedquotes = ""
+        lex_parser.wordchars += "~-./*?="
         tokens = [token for token in lex_parser]
 
         _MOD_LOGGER.debug("Plugin tokens: %s", tokens)
@@ -215,34 +215,36 @@ class LeetTerminal(cmd.Cmd):
 
     def do_add_job(self, args):
 
-        if self.machine_list is None:
+        if self.hostname_list is None:
             print("Error, no machines defined. Use the commnad 'machines'")
             return
         if self.plugin is None:
             print("Error, no plugins defined. Use the 'plugin set' command")
             return
 
+        print("***********************************")
         print("********* Job information *********")
         print("***********************************")
         print("Plugin: ", self.plugin.LEET_PG_NAME)
         param = self.plugin.get_plugin_parameters()
         if param is not None:
             print("\tParameters:")
-            for p in param:
-                print("\t", p.name, "=", p.value)
+            for name, value in param.items():
+                print("\t", name, "=", value)
         print("***********************************")
-        print("Amount of machines: ", len(self.machine_list))
-        print("Machine list: ", ",".join(self.machine_list))
+        print("Amount of machines: ", len(self.hostname_list))
+        print("Machine list: ", ",".join(self.hostname_list))
         print("***********************************")
         print("The job(s) will be sent for processing.")
         confirm = input("Confirm? (y/n) ")
         if confirm.strip().lower() == "y":
-            self._leet.start_jobs(self.machine_list, self.plugin)
-            #self._leet_queue.put((self.machine_list, self.plugin))
-
-        print("Job scheduled. Cleaning parameters.")
-        self.machine_list = None
-        self.plugin = None
+            self._leet.start_jobs(self.hostname_list, self.plugin)
+            print("Job scheduled. Cleaning parameters.")
+            self.hostname_list = None
+            self.plugin = None
+        else:
+            print("Job cancelled.")
+        
 
     def do_show(self, args):
         completed_jobs = self._leet.return_completed_jobs()
@@ -282,7 +284,7 @@ class LeetTerminal(cmd.Cmd):
         """
         options = ["list", "set"] + self._leet.plugin_list
         if len(tokens) > 3 or tokens[2] not in options:
-            print("***No help for ", " ".join(tokes))
+            print("***No help for ", " ".join(tokens))
             return
 
         if tokens[2] == "list":

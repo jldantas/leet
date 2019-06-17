@@ -8,7 +8,8 @@ import queue
 
 import leet.backends.cb
 import leet.api
-
+import leet.base
+import leet.plugins.dir_list
 
 from cbapi.response import Process, CbResponseAPI, Sensor
 from cbapi.response.models import Sensor as CB_Sensor
@@ -26,36 +27,15 @@ _leet_log.addHandler(_log_handler)
 _leet_log.setLevel(_LEVEL)
 
 def main():
-    q = queue.SimpleQueue()
-    CB_backend = leet.backends.cb.Backend("default")
-    leet_api = leet.api.Leet([CB_backend], q)
-
-
-    #hostnames = ["SPEEDYTURTLEW10"]
-    #hostnames = ["US1004511WP"]
-    hostnames = ["DESKTOP-90N8EBG"]
-
-    # pg = leet_api.get_plugin("dirlist")
-    # pg_param = {"path" : "c:\\"}
-    # pg.set_param(pg_param)
-
-
-    pg = leet_api.get_plugin("process_list")
-    pg_param = {}
-    pg.set_param(pg_param)
-
-
+    a = leet.plugins.dir_list.LeetPlugin()
     try:
-        leet_api.start()
-        leet_api.schedule_jobs(pg, hostnames)
-        time.sleep(600)
-        print(q.get())
-        #print(job, sensor.status)
-    except KeyboardInterrupt:
-        print("Exiting event loop")
-    finally:
-        leet_api.shutdown()
 
+        print(a.get_help())
+
+        b = a.parse_parameters("--path c:\\google".split(" "))
+        print(b)
+    except SystemExit as e:
+        print(e)
 
 # def main():
 #     a = CbResponseAPI(profile="default")

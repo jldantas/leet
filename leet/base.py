@@ -9,6 +9,8 @@ import logging
 
 _MOD_LOGGER = logging.getLogger(__name__)
 
+from .errors import LeetPluginError, LeetError
+
 class LeetJobStatus(enum.Enum):
     '''Flags the status of an individual job.
 
@@ -28,18 +30,45 @@ class LeetJobStatus(enum.Enum):
     ERROR = 0x4
 
 class LeetSOType(enum.Enum):
+    """Defines the types of SO in a standard way."""
     WINDOWS = 0x1
     LINUX = 0x2
     MAC = 0x3
     UNKNOWN = 0X10
 
 class LeetMachine(metaclass=abc.ABCMeta):
+    """Represents a machine with the relevant information and how to
+    interact in the scope of the LEET.
+
+    This class is one of the classes that HAS to be overloaded when writing a
+    backend.
+
+    Attributes:
+        hostname (str): The machine hostname
+        can_connect (bool): If True, LEET will try to connect to the machine if
+            there is a job scheduled
+        drive_list (list of str): A list of drives for the machine
+        so_type (LeetSOType): The type of SO of the machine
+        backend_name (str): The name of the backend where the machine was found.
+    """
+
     def __init__(self, hostname, backend_name):
+        """Returns a LeetMachine object.
+
+        Args:
+            hostname (str): hostname of the machine
+            backend_name (str): Name of the backend the machine can be found
+        """
         self.hostname = hostname
-        self.can_connect = False
         self.so_type = LeetSOType.UNKNOWN
         self.drive_list = None
         self.backend_name = backend_name
+
+    @property
+    @abc.abstractmethod
+    def can_connect(self):
+        """A flag that shows if the machine can receive a connection. It should
+        be updated automatically or when the refresh method is called."""
 
     @abc.abstractmethod
     def refresh(self):
@@ -47,7 +76,11 @@ class LeetMachine(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def connect(self):
-        """Start the session with the machine, it has to return a LeetSession subclass"""
+        """Starts the session with the machine, it has to return a LeetSession subclass
+
+        Returns:
+            (LeetSession*): A subclass of LeetSession
+        """
 
     def __repr__(self):
         'Return a nicely formatted representation string'
@@ -57,10 +90,29 @@ class LeetMachine(metaclass=abc.ABCMeta):
                )
 
 class LeetSession(metaclass=abc.ABCMeta):
-    """You can use the raw_session directly, but the plugin will get bound to
-    a particular backend and leet does not check for this.
+    """An abstraction of a session, allowing the decoupling of the backend and
+    the plugin. This is class is (or subclasses) are passed to plugins where
+    it will be used to interact with the machine.
+
+    Note:
+        Any implementation of this class can raise only two errors aside from the
+        standard python errors: 'LeetSessionError' and 'LeetCommandError'. This
+        allows the plugins to handle only those, simplyfing plugin design.
+
+    Warning:
+        The 'raw_session' attribute can be used by any plugin, but it becomes
+        responsibility of the plugin to check if the class if of the right
+        type and correclty handle and/or raise the necessary errors.
+
+    Attributes:
+        raw_session (?): The raw session created by the backend, this depends
+            completely on the backend in use.
+        path_separator (str): Tells what is the path separator based on the
+            remote machine type
+
     """
     def __init__(self, session, machine_info):
+        """Returns an object of LeetSession"""
         self.raw_session = session
 
         if machine_info.so_type == LeetSOType.WINDOWS:
@@ -172,7 +224,32 @@ class LeetSession(metaclass=abc.ABCMeta):
 
 
 class LeetSearchRequest():
+    """Represents a search request from LEET to the backends with the necessary
+    information on what we are looking for and, if something is found, what
+    is necessary to create a job from it.
+
+    Attributes:
+        id (uuid.UUID): Automatically random generated search ID
+        start_time (datetime.datetime): The time, in UTC, when the search was
+            created
+        end_time (datetime.datetime): The time, in UTC, when the search was
+            finished
+        hostnames (list of str): A list of hostnames the backends will look for
+        plugin (LeetPlugin*): An instance of the LeetPlugin that will be executed
+            on the machines
+        ready (bool): A boolean that tells if the search is finished or not
+        backend_quantity (int): The number of backends that are expected results
+    """
+
     def __init__(self, hostnames, plugin, backend_numbers=0):
+        """Returns a new object of LeetSearchRequest.
+
+        Args:
+            hostnames (list of str): A list of hostnames the backends will look for
+            plugin (LeetPlugin*): An instance of the LeetPlugin that will be executed
+                on the machines
+            backend_numbers (int): The number of backends that are expected results
+        """
         self.id = uuid.uuid4()
         self.start_time = datetime.datetime.utcnow()
         self.end_time = None
@@ -182,6 +259,8 @@ class LeetSearchRequest():
 
         self.backend_quantity = backend_numbers
 
+        #we can have any number of threads adding machines or setting themselves
+        #as completed, lock to control all
         self._completed_backends = set()
         self._change_lock = threading.RLock()
 
@@ -195,15 +274,35 @@ class LeetSearchRequest():
         return self._found_machines
 
     def add_completed_backend(self, backend_name):
+        """Informs that a backend has completed the search.
+
+        This information is tracked and if all backends have returned information,
+        the search is completed. Once that happens, it is informed to the class
+        that this happened.
+
+        Args:
+            backend_name (str): The uniqe name of the backend that has finished
+                the search
+        """
         if not self.ready:
-            self._change_lock.acquire()
-            self._completed_backends.add(backend_name)
-            if len(self._completed_backends) >= self.backend_quantity:
-                self.end_time = datetime.datetime.utcnow()
-                self.ready = True
-            self._change_lock.release()
+            with self._change_lock:
+                self._completed_backends.add(backend_name)
+                if len(self._completed_backends) >= self.backend_quantity:
+                    self.end_time = datetime.datetime.utcnow()
+                    self.ready = True
+
 
     def add_found_machines(self, machine_list):
+        """Adds the machines found by the backend to the list of found machines.
+
+        Note:
+            There is no guarantee that a machine won't be found in more than one
+            backend.
+
+        Args:
+            machine_list (list of LeetMachine*): A list of subclasses of LeetMachine
+                with all the machines found by the backend
+        """
         if not self.ready:
             with self._machine_lock:
                 self._found_machines += machine_list
@@ -413,11 +512,41 @@ class LeetJob():
                )
 
 class _BackendControl(enum.Enum):
+    """Controls what activity will be performed by the LeetBackend.
+
+    Control command            | Value
+    =======================================
+    STOP                       | None
+    SEARCH                     | LeetSearchRequest
+    """
     STOP = 0x0
     SEARCH = 0x1
 
 class LeetBackend(metaclass=abc.ABCMeta):
+    """The main class for a LeetBackend. It abstracts the interaction between
+    the Leet main class the backends.
+
+    It is one of the classes that has to be overloaded by a backend.
+
+    Attributes:
+        backend_name (str): Name of the backend. Needs to be unique per instance
+            of the backend
+        max_sessions (int): The maximum number of sessions that a backend can
+            hold simultaneously when connecting to the remote machines
+        leet (Leet): A "pointer" to the main Leet class, allowing the backend
+            to inform it of things it has done.
+    """
+
     def __init__(self, backend_name, max_sessions):
+        """Returns a new object of LeetBackend. Can't be used directly, only
+        by subclasses.
+
+        Args:
+            backend_name (str): The name of the backend. It has to be unique by
+                instance.
+            max_sessions (int): The maximum number of sessions that a backend can
+                hold simultaneously when connecting to the remote machines
+        """
         self.backend_name = backend_name
         self.max_sessions = max_sessions
         #change this to to a threadpool?
@@ -426,20 +555,39 @@ class LeetBackend(metaclass=abc.ABCMeta):
         self.leet = None
 
     def start(self):
-        """If overloaded, needs to call parent and return self"""
+        """Start the backend thread and resources.
+
+        Note:
+            If overloaded by the subclass, the subclass MUST call the parent
+            and return 'self'"""
         self._monitor_thread.start()
 
         return self
 
     def shutdown(self):
-        """If overloaded, needs to call parent"""
+        """Deallocates the backend threads and resources.
+
+        Note:
+            If overloaded, by the subclass, the subclass MUST call the parent
+        """
         self._queue.put((_BackendControl.STOP, None))
         self._monitor_thread.join()
 
     def search_machines(self, search_request):
+        """Search for a group of machines on the backend.
+
+        Args:
+            search_request (LeetSearchRequest): The request with the information
+                to be searched.
+        """
         self._queue.put((_BackendControl.SEARCH, search_request))
 
     def _monitor_queue(self):
+        """This method is the main loop for the thread present in the class.
+
+        It monitors the internal queue for anything coming from the Leet class
+        or the backend implementation and interfaces between them.
+        """
         while True:
             code, value = self._queue.get()
             if code == _BackendControl.STOP:
@@ -454,171 +602,39 @@ class LeetBackend(metaclass=abc.ABCMeta):
                 if search_request.ready:
                     _MOD_LOGGER.debug("Search is ready, sending notification")
                     self.leet.notify_search_completed(search_request)
-
             else:
-                #TODO raise error
-                pass
+                raise LeetError("'%s' is not a valid internal code", code)
 
             self._queue.task_done()
 
     def __enter__(self):
+        """Enter context"""
         return self.start()
 
     def __exit__(self, exeception_type, exception_value, traceback):
+        """Leave context"""
         #print(exeception_type, exception_value, traceback)
         self.shutdown()
 
     @abc.abstractmethod
     def _search_machines(self, search_request):
-        """Needs to be overloaded"""
+        """Method that search for the machines in the backend.
 
+        This method needs to be overloaded by the subclass.
 
-
-# class LeetBackend(metaclass=abc.ABCMeta):
-#     #TODO interface with plugin should be pushed to this class?
-#     """The main class for all backend implementations.
-#
-#     The backend is responsible for establishing a session with the machine/endpoint.
-#     This might take as many steps as necessary, for example, verify if the machine
-#     is online, connecting to the machine and should happen in a non-blocking way.
-#
-#     The backend is also required to move the job to the correct status when necessary,
-#     interface with the plugin, sending the correct parameters, getting the result
-#     and properly understanding if the plugin executed correctly or not.
-#
-#     It is also required to support context manager and make sure any resources are
-#     correctly closed.
-#
-#     Attributes:
-#         LEET_BACKEND (string): The name of the backend. Should be unique for all
-#             backends.
-#     """
-#
-#     def __init__(self, leet_backend_name):
-#         """Creates a new LeetBackend object. Receives the name of the backend.
-#         As a metaclass, it can't be instantiated by itself.
-#
-#         Args:
-#             leet_backend_name (string): The name of the backend
-#
-#         Returns:
-#             LeetBackend: New object representing the job.
-#         """
-#         self.LEET_BACKEND = leet_backend_name
-#         self._leet_control = None
-#
-#     def notify_job_completed(self, job):
-#         """Should be called by the backend implementation when a job has been
-#         completed. This will push the notification back to the API to allow correct
-#         processing.
-#
-#         Args:
-#             job (LeetJob): The LeetJob that has been completed.
-#         """
-#         self._leet_control._notifyjob(job)
-#
-#     @abc.abstractmethod
-#     def close(self):
-#         """Closes/Stops all the backend resources"""
-#
-#     @abc.abstractmethod
-#     def start(self):
-#         """Allocate all the necessary resources to allow the backend to start"""
-#
-#     @abc.abstractmethod
-#     def add_task(self, task):
-#         """Must receive a LeetJob"""
-#
-#     @abc.abstractmethod
-#     def add_tasks(self, tasks):
-#         """Must receive a list of LeetJob"""
-#
-#     @abc.abstractmethod
-#     def cancel_task(self, task):
-#         """Must receive a LeetJob"""
-#
-#     def _set_leet_control(self, leet_control):
-#         """Is called internally to link the Leet parent class with the backend,
-#         so communication can flow. Should be called only from the contructor of
-#         the api.Leet class."""
-#         self._leet_control = leet_control
+        Args:
+            search_request (LeetSearchRequest): The search request to be processed
+        """
 
 ##############################################################################
 # Plugin basic data class section
 ##############################################################################
 
-class LeetPluginParameter():
-    #TODO replace this by arparser and be happy.
-    """Defines a single parameter for a plugin. These need to be registered on
-    the plugin instance."""
-    def __init__(self, name, description, mandatory):
-        self._vars = {"name" : name,
-                     "description" : description,
-                     "mandatory" : mandatory,
-                     "value" : None}
+import argparse
 
-    #Defines properties based on the dictionary
-    def name():
-        doc = "Name of the parameter."
-        def fget(self):
-            return self._vars["name"]
-        def fset(self, value):
-            raise LeetPluginParameter("Parameter 'name' is immutable.")
-        def fdel(self):
-            del self._vars["name"]
-        return locals()
-    name = property(**name())
-
-    def description():
-        doc = "Holds the descriptions of a parameter."
-        def fget(self):
-            return self._vars["description"]
-        def fset(self, value):
-            raise LeetPluginParameter("Parameter 'description' is immutable.")
-        def fdel(self):
-            del self._vars["description"]
-        return locals()
-    description = property(**description())
-
-    def value():
-        doc = "The value of the parameter."
-        def fget(self):
-            return self._vars["value"]
-        def fset(self, value):
-            self._vars["value"] = value
-        def fdel(self):
-            del self._vars["value"]
-        return locals()
-    value = property(**value())
-
-    def mandatory():
-        doc = "If a parameter is mandatory or not."
-        def fget(self):
-            return self._vars["mandatory"]
-        def fset(self, value):
-            raise LeetPluginParameter("Parameter 'mandatory' is immutable.")
-        def fdel(self):
-            del self._vars["mandatory"]
-        return locals()
-    mandatory = property(**mandatory())
-
-    def __bool__(self):
-        """Test if a parameter is defined correctly.
-
-        The logic of the test is if a parameter is mandatory, but not defined,
-        we have a problem. Otherwise, the parameter is correctly defined.
-        """
-        if self.mandatory and self.value is None:
-            return False
-
-        return True
-
-    def __repr__(self):
-        'Return a nicely formatted representation string'
-        return (f'{self.__class__.__name__}(value={self.value}, '
-                f'name={self.name}, '
-                f'mandatory={self.mandatory}, description={self.description})'
-               )
+class LeetPluginParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise LeetPluginError(message)
 
 class PluginBase(metaclass=abc.ABCMeta):
     """The base class for all plugins. Defines basic methods on how to handle
@@ -639,8 +655,6 @@ class PluginBase(metaclass=abc.ABCMeta):
         LEET_PG_NAME (str): name of the plugin, as it is going to be presented to
             the user
         LEET_PG_DESCRIPTION (str): A short description of the plugin
-        LEET_BACKEND (list of str): A list of the strings with the backends that
-            are supported by the plugin
     """
     #TODO provide a hashing function as part of the backend?
 
@@ -651,63 +665,12 @@ class PluginBase(metaclass=abc.ABCMeta):
         Returns:
             PluginBase: New object representing the job.
         """
-        self._ltpg_param = {}
+        self.arg_parser = LeetPluginParser(prog=self.LEET_PG_NAME, add_help=False)
+        self.args = None
+        #self._ltpg_param = {}
 
-    def reg_param(self, param):
-        """Register a parameter. It should be called in the constructor of the class
-        that subclasses of PluginBase.
-
-        Args:
-            param (LeetPluginParameter): The parameter necessary for the plugin
-        """
-        self._ltpg_param[param.name] = param
-
-    def set_param(self, parameters):
-        """Set a parameter for an instance. Shouldn't be called directly by a plugin.
-        LEET itslef will set the parameters coming from the user.
-
-        Args:
-            parameters (dict): A dictionary where each key is a parameter name and
-                the value of the dict is the value of the parameter.
-
-        Raises:
-            LeetPluginError: If the parameter name is not valid for the plugin
-        """
-        for key in parameters.keys():
-            if key not in self._ltpg_param:
-                raise LeetPluginError("Parameter is invalid for the chosen plugin.")
-            else:
-                self._ltpg_param[key].value = parameters[key]
-
-    def get_param(self, name):
-        """Return the value of a parameter by name. Plugins should use this
-        method to get the value of a parameter.
-
-
-        Set a parameter for an instance. Shouldn't be called directly by a plugin.
-        LEET itslef will set the parameters coming from the user.
-
-        Args:
-            name (string): The name of the parameter.
-
-        Returns:
-            The parameter value.
-
-        Raises:
-            KeyError: If the parameter name does not exists
-        """
-        #TODO a better way of getting this using properties
-        return self._ltpg_param[name].value
-
-    def check_param(self):
-        """Does basic validation of the parameters. It makes sure all the
-        necessary parameters are defined. Shoudl not be called by plugins, but
-        can be overloaded in case the plugin requires better/different type
-        of validation.
-        """
-        for key, item in self._ltpg_param.items():
-            if not item:
-                raise LeetPluginError(f"Mandatory parameter '{key}' missing")
+    def parse_parameters(self, args):
+        self.args = self.arg_parser.parse_args(args)
 
     def get_help(self):
         """Returns a plugin help text based on description and parameters.
@@ -715,23 +678,12 @@ class PluginBase(metaclass=abc.ABCMeta):
         Returns:
             str: A string containing the help of the plugin
         """
-        param_list = []
-        param_help = []
+        header = [self.LEET_PG_DESCRIPTION, "=" * 40]
+        help_msg = self.arg_parser.format_help()
+        help_msg = help_msg.split(" ", 1)[1].replace("optional arguments:", "").split("\n")
+        help_msg = "\n".join(header + [a for a in help_msg if a])
 
-        for k, v in self._ltpg_param.items():
-            param_list.append(k)
-            param_help.append("\t".join([k, v.description]))
-
-        param_list = "] [".join(param_list)
-        param_help.insert(0, "\t")
-        param_help = "\n\t".join(param_help)
-
-        if param_list:
-            help_text = "".join([self.LEET_PG_NAME, " [", param_list, "]\t", self.LEET_PG_DESCRIPTION, param_help])
-        else:
-            help_text = "".join([self.LEET_PG_NAME, "\t", self.LEET_PG_DESCRIPTION])
-
-        return help_text
+        return help_msg
 
     def get_plugin_parameters(self):
         """Returns all the parameters of a plugin.
@@ -740,7 +692,7 @@ class PluginBase(metaclass=abc.ABCMeta):
             list of LeetPluginParameter: A list with all the parameters accepted
                 by the plugin
         """
-        return [v for v in self._ltpg_param.values()]
+        return vars(self.args)
 
     @abc.abstractmethod
     def run(self, session, hostname):

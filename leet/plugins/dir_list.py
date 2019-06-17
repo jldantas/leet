@@ -1,23 +1,22 @@
+import argparse
 from datetime import datetime as _datetime
 
-from leet.base import PluginBase, LeetPluginParameter
+from leet.base import PluginBase, LeetPluginParser
 
 
 class LeetPlugin(PluginBase):
     LEET_PG_NAME = "dirlist"
     LEET_PG_DESCRIPTION = "Returns a directory list from a path with STD timestamp data."
-    LEET_BACKEND = ["cb"]
 
     def __init__(self):
         super().__init__()
-        self.reg_param(LeetPluginParameter("path", "Path to be listed on the remote endpoint", True))
-
+        self.arg_parser.add_argument("--path", help="Path to be listed on the remote endpoint", required=True)
 
     def run(self, session, hostname):
         data = []
 
         #result.headers = ["Access ts", "Write ts", "Created ts", "Filename", "Size", "Attributes"]
-        temp_data = session.list_directory(self.get_param("path"))
+        temp_data = session.list_directory(self.args.path)
         for item in temp_data:
             data_processed = {"Access ts" : _datetime.utcfromtimestamp(item["last_access_time"]),
                                 "Write ts" : _datetime.utcfromtimestamp(item["last_write_time"]),

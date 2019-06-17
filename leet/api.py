@@ -385,7 +385,8 @@ class Leet(threading.Thread):
             hostnames (list of str): A list with the hostnames where the search
             will be executed.
         """
-        plugin.check_param()
+        #TODO remove
+        #plugin.check_param()
         search_request = LeetSearchRequest(hostnames, plugin)
         _MOD_LOGGER.debug("Scheduling jobs for %i machines", len(hostnames))
         self._queue.put((_LTControl.SEARCH_BACKEND, search_request))
