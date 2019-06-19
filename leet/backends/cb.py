@@ -82,7 +82,8 @@ class CBSession(LeetSession):
             "get_file" : self.raw_session.get_file,
             "put_file" : self.raw_session.put_file,
             "delete_file" : self.raw_session.delete_file,
-            "start_process" : self.raw_session.create_process}
+            "start_process" : self.raw_session.create_process,
+            "make_dir" : self.raw_session.create_directory}
 
     def start_process(self, cmd_string, cwd=None, background=False):
         """See base class documentation"""
@@ -97,16 +98,55 @@ class CBSession(LeetSession):
         if self.exists(remote_file_path) and overwrite:
             self._execute("delete_file", remote_file_path)
 
-        try:
-            self._execute("put_file", fp, remote_file_path)
-        except cbapi.live_response_api.LiveResponseError as e:
-            raise LeetCommandError(str(e)) from e
+        remote_path = self.path_separator.join(remote_file_path.split(self.path_separator)[:-1])
+        if not self.exists(remote_path):
+            self.make_dir(remote_path)
+
+        self._execute("put_file", fp, remote_file_path)
+
+    def make_dir(self, remote_path, recursive=True):
+        """See base class documentation"""
+        path_parts = remote_path.split(self.path_separator)
+
+        #if the last split is empty, probably it was passed with trailling
+        #separator
+        if not path_parts[-1]:
+            path_parts = path_parts[:-1]
+
+        #This skips the root of the path
+        check = []
+        check.append(path_parts.pop(0))
+
+        if recursive:
+            for i, part in enumerate(path_parts):
+                check.append(part)
+                if not self.exists(self.path_separator.join(check)):
+                    #the moment we can't find a path, we need to create everything
+                    #from there forward
+                    break
+            if i + 1 != len(path_parts):
+                check.pop(-1)
+                for missing_path in path_parts[i:]:
+                    check.append(missing_path)
+                    path = self.path_separator.join(check)
+                    _MOD_LOGGER.debug("Trying to create path '%s' on the remote host", path)
+                    self._execute("make_dir", path)
+        else:
+            self._execute("make_dir", remote_path)
 
     def exists(self, remote_file_path):
         """See base class documentation"""
-        split = remote_file_path.split(self.path_separator)
-        file_name = split[-1]
-        path = self.path_separator.join(split[:-1]) + self.path_separator
+        if remote_file_path[-1] == self.path_separator:
+            idx = -2
+        else:
+            idx = -1
+        split_path = remote_file_path.split(self.path_separator)
+        #passing a root path (c:, d:, /, etc) is a logic error and raises an
+        #exception
+        if len(split_path) == 1:
+            raise LeetCommandError("Can't verify existence of root paths.")
+        file_name = split_path[idx]
+        path = self.path_separator.join(split_path[:idx]) + self.path_separator
 
         try:
             list_dir = self.raw_session.list_directory(path)
@@ -114,10 +154,6 @@ class CBSession(LeetSession):
             return False
 
         return bool([a for a in list_dir if a["filename"] == file_name])
-        # if [a for a in list_dir if a["filename"] == file_name]:
-        #     return True
-        # else:
-        #     return False
 
     def get_file(self, remote_file_path):
         """See base class documentation"""

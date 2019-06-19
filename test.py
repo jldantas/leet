@@ -26,16 +26,83 @@ _leet_log = logging.getLogger("leet")
 _leet_log.addHandler(_log_handler)
 _leet_log.setLevel(_LEVEL)
 
+import os
+
+def make_dir(remote_path, recursive=True):
+    separator = "\\"
+
+    path_parts = remote_path.split(separator)
+
+    #This skips the root of the path
+    check = []
+    check.append(path_parts.pop(0))
+
+    if recursive:
+        for i, part in enumerate(path_parts):
+            check.append(part)
+            print("check", check)
+            if not os.path.exists(separator.join(check)):
+                #the moment we can't find a path, we need to create everything
+                #from there forward
+                break
+        print(i, len(path_parts))
+        if i + 1 == len(path_parts):
+            print("nothing to do")
+        else:
+            print("do something")
+        check.pop(-1)
+        for missing_path in path_parts[i:]:
+            check.append(missing_path)
+            print("build", separator.join(check))
+    else:
+        print("build all", remote_path)
+
 def main():
-    a = leet.plugins.dir_list.LeetPlugin()
-    try:
 
-        print(a.get_help())
 
-        b = a.parse_parameters("--path c:\\google".split(" "))
-        print(b)
-    except SystemExit as e:
-        print(e)
+    #path = "c:\\Windows\\parte1\\part2\\parte3\\la.txt"
+    path = "c:\\Windows\\bla.txt"
+    path = "c:\\Windows\\system32\\bla.txt"
+    separator = "\\"
+
+    path_parts = path.split(separator)
+
+
+    make_dir(separator.join(path_parts[:-1]), True)
+    #
+    # to_create = []
+    # for i, parts in enumerate(reversed(path_parts[:-1]), 1):
+    #     print("part:", parts)
+    #     print("tested path", separator.join(path_parts[:-1*i]))
+    #     if not os.path.exists(separator.join(path_parts[:-1*i])):
+    #         to_create.append(parts)
+    #     else:
+    #         break
+    #
+    # #TODO add if machine is windows?
+    # if len(path_parts) == len(to_create):
+    #     #TODO exception
+    #     print("error")
+    #
+    # #for part in to_create:
+    #
+    #
+    # print(path_parts)
+    # print(to_create)
+    # print(i)
+
+
+
+# def main():
+#     a = leet.plugins.dir_list.LeetPlugin()
+#     try:
+#
+#         print(a.get_help())
+#
+#         b = a.parse_parameters("--path c:\\google".split(" "))
+#         print(b)
+#     except SystemExit as e:
+#         print(e)
 
 # def main():
 #     a = CbResponseAPI(profile="default")

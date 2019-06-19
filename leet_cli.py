@@ -120,7 +120,7 @@ class LeetTerminal(cmd.Cmd):
                 break
             else:
                 LeetTerminal.prompt = "! LEET> "
-                finished_jobs.append(leet_job)
+                self.finished_jobs.append(leet_job)
                 #TODO do something
                 # if not self._notified:
                 #     print("\nSomething finished. Use 'show' to get the results.")
@@ -312,24 +312,24 @@ class LeetTerminal(cmd.Cmd):
 
     def do_test(self, line):
         #hostnames = ["US1004511WP", "DESKTOP-90N8EBG"]
-        #hostnames = ["DESKTOP-90N8EBG"]
+        hostnames = ["DESKTOP-90N8EBG"]
         #hostnames = ["US1004511WP"]
-        hostnames = ["SPEEDYTURTLEW10"]
+        #hostnames = ["SPEEDYTURTLEW10"]
 
-        pg = self._leet.get_plugin("dirlist")
-        pg_param = {"path" : "c:\\"}
+        pg = self._leet.get_plugin("process_list")
+        #pg_param = {"path" : "c:\\"}
         #pg_param = {"path" : "c:\\akljsdf"}
-        pg.set_param(pg_param)
-        self._leet.start_jobs(hostnames, pg)
+        #pg.set_param(pg_param)
+        self._leet.schedule_jobs(pg, hostnames)
 
     def emptyline(self):
         pass
 
 
 def main():
-    #cli = LeetTerminal()
 
-    with LeetTerminal(["all"]) as cli:
+    #with LeetTerminal(["all"]) as cli:
+    with LeetTerminal() as cli:
             cli.cmdloop()
 
     # try:

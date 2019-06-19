@@ -166,6 +166,9 @@ class LeetSession(metaclass=abc.ABCMeta):
     def put_file(self, fp, remote_file_path, overwrite):
         """Transfer a file to the remote machine.
 
+        If the destination path does not exists, the backend implemenation MUST
+        create it, unless the disk doesn't exists.
+
         Args:
             fp (file like object): A file like object with the data
             remote_file_path (str): Absolute path where the file will be saved
@@ -195,8 +198,23 @@ class LeetSession(metaclass=abc.ABCMeta):
         """
 
     @abc.abstractmethod
+    def make_dir(remote_path, recursive=True):
+        """Creates a directory on the remote machine. This function WILL NOT
+        check for root path and providing a path like "c:" or "/" is a violation.
+
+        Args:
+            remote_path (str): The remote path that will be created, WITHOUT the
+                filename
+            recursive (bool): If this flag is true, it will create all necessary
+                subdirectories in the path
+        """
+
+    @abc.abstractmethod
     def exists(self, remote_file_path):
         """Checks if a path or file exist.
+
+        Note:
+            This method HAS to correctly handle files and directories!
 
         Args:
             remote_file_path (str): File path to be checked.
