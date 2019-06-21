@@ -1,24 +1,26 @@
 
-A plugin MUST define three class variables called: LEET_PG_NAME, LEET_PG_DESCRIPTION
-and LEET_BACKEND.
+The implementation of a plugin is reasonable simple, but also requires a caution.
+LEET will not try any kind of control when a plugin is executing. Effectively
+speaking, if you try to delete all the folders on the machine, LEET will execute
+just that.
+
+To implement a plugin, create a class called 'LeetPlugin' in a '.py' inside the
+plugin directory, and inherit from the class 'leet.base.PluginBase'.
+A plugin MUST define two class variables called: LEET_PG_NAME, LEET_PG_DESCRIPTION.
 LEET_PG_NAME is the name of the plugin and how LEET will call it internally. It must
-be unique for all plugins. The LEET_PG_DESCRIPTION is a description of the plugin.
-LEET_BACKEND is a list of backends the plugin supports.
+be unique between all plugins. The LEET_PG_DESCRIPTION is a description of the plugin.
 
-#TODO I think it can support only one backend, so we should expand or remove it.
-#TODO create an abstraction layer between the backend and the plugins
-
-The overriding class must be called LeetPlugin.
-
-To create a plugin it is necessary to create a subclass of 'leet.base.PluginBase'
-and override the method 'run'. The method 'run' receives an instance of the
-session with the machine and the machine name.
-This session depends on the type of backend used and the machine name is a string.
+The class create also needs to override the method 'run'.
+The method 'run' receives an instance of the session with the machine (subclass of
+'leet.base.LeetSession' and an object with some basic machine information (object
+of 'leet.base.LeetMachine'.
 There is NO guarantee the machine name is unique, unless the backend guarantees
 it.
 
-The constructor of the plugin MUST register correctly all the parameters that
-the plugin expects to receive from the user.
+If the plugin requires any parameters, the base class provides the attribute
+'arg_parser', which is an object of the argparse module. All the parameters should
+be added to it (read the official documentation). Once the plugin starts executing,
+the parsed arguments will be defined in the attribute 'args'.
 
 The newly created plugin MUST be stateless, which means that no information
 other than the one requested by the 'leet.base.PluginBase' constructor should
@@ -26,20 +28,14 @@ be saved on the instance. The LEET code will create ONE single instance per grou
 of jobs and if the plugin implementation relies on an instance level state it
 can cause undefined behaviour.
 
-Once the plugin has finished what it needs to do, the result MUST be an instance
-of 'leet.base.PluginResult' correctly formed. That is a two fold need: if the
-plugin was successful or not and the returned data.
-
 LEET only supports data to be returned in a table-like format, that will be used
 to print information to the user or to save it in a file. As such, the returned
-instance requires a defined list of headers with the data and the data in a
-list of dictionaries following  the format key = header and value = data. For example:
+instance requires the data in a list of dictionaries following the format
+key = header and value = data. For example:
 
-  result = PluginResul()
-  result.headers = ["header a", "header b"]
-  result.data = [{"header a" : 10, "header b" : "Hello"},
-                {"header a" : 20, "header b" : "Not talking"}]
+  data = [{"header a" : 10, "header b" : "Hello"},
+          {"header a" : 20, "header b" : "Not talking"}]
 
 If a different type of return is necessary, for example, saving a file downloaded
 from a machine to disk, the plugin can do what is necessary for it and return both
-'headers' and 'data' as empty lists.
+and 'data' as empty list.

@@ -28,47 +28,64 @@ _leet_log.setLevel(_LEVEL)
 
 import os
 
-def make_dir(remote_path, recursive=True):
-    separator = "\\"
+class Test():
+    def __init__(self):
+        self.path_separator = "\\"
 
-    path_parts = remote_path.split(separator)
+    def exists(self, path):
+        return os.path.exists(path)
 
-    #This skips the root of the path
-    check = []
-    check.append(path_parts.pop(0))
+    def make_dir(self, remote_path, recursive=True):
+        """See base class documentation"""
+        path_parts = remote_path.split(self.path_separator)
 
-    if recursive:
-        for i, part in enumerate(path_parts):
-            check.append(part)
-            print("check", check)
-            if not os.path.exists(separator.join(check)):
-                #the moment we can't find a path, we need to create everything
-                #from there forward
-                break
-        print(i, len(path_parts))
-        if i + 1 == len(path_parts):
-            print("nothing to do")
+        #if the last split is empty, probably it was passed with trailling
+        #separator
+        if not path_parts[-1]:
+            path_parts = path_parts[:-1]
+
+        #This skips the root of the path
+        check = []
+        necessary_create = False
+        check.append(path_parts.pop(0))
+
+        if recursive:
+            for i, part in enumerate(path_parts):
+                check.append(part)
+                if not self.exists(self.path_separator.join(check)):
+                    #the moment we can't find a path, we need to create everything
+                    #from there forward
+                    necessary_create = True
+                    break
+
+            print(i, "check", check)
+
+            if necessary_create:
+                check.pop(-1)
+                for missing_path in path_parts[i:]:
+                    check.append(missing_path)
+                    path = self.path_separator.join(check)
+                    _MOD_LOGGER.debug("Trying to create path '%s' on the remote host", path)
+                    print("building dir", path)
+                    #self._execute("make_dir", path)
+            else:
+                _MOD_LOGGER.debug("No path need to be created.")
         else:
-            print("do something")
-        check.pop(-1)
-        for missing_path in path_parts[i:]:
-            check.append(missing_path)
-            print("build", separator.join(check))
-    else:
-        print("build all", remote_path)
+            print("building dir", remote_path)
+            #self._execute("make_dir", remote_path)
 
 def main():
 
 
     #path = "c:\\Windows\\parte1\\part2\\parte3\\la.txt"
-    path = "c:\\Windows\\bla.txt"
-    path = "c:\\Windows\\system32\\bla.txt"
+    path = "C:\\maintenance2\\bla.zip"
+    #path = "c:\\Windows\\system32\\bla.txt"
     separator = "\\"
 
     path_parts = path.split(separator)
+    t = Test()
+    t.make_dir(separator.join(path_parts[:-1]), True)
 
-
-    make_dir(separator.join(path_parts[:-1]), True)
     #
     # to_create = []
     # for i, parts in enumerate(reversed(path_parts[:-1]), 1):

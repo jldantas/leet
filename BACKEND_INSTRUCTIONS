@@ -1,0 +1,27 @@
+
+A backend requires the implementation of 3 classes.
+
+- A class that represent the machine (inherits from 'leet.base.LeetMachine')
+- A class that represents a session and interacts with the remote machine
+  (inherits from 'leet.base.LeetSession')
+- A class that interacts with the server/backend instance (inherits from 'leet.base.LeetBackend')
+
+# Machine information ('leet.base.LeetMachine')
+
+The main objective of this class is to provide abstraction to LEET and the Plugins
+on what information is available on the for a machine and how to start a session
+with the remote machine. See the documentation for further information.
+
+# Session information ('leet.base.LeetSession')
+
+This is probably the most heavy duty class that a backend needs to implement.
+Its main objective is to interact with the remote machine and pass commands
+to the remote machine and returns the results to the plugins.
+
+It has a very rigid interface (see class documentation).
+
+# Backend information ('leet.base.LeetBackend')
+
+The backend implementation is the first class LEET will interact with and
+needs to establish a connection with the backend itself and provide basic search
+capabilities.

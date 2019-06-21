@@ -82,15 +82,6 @@ def _load_plugins(plugin_dir="plugins"):
 
     return plugins
 
-
-    # NEW_JOB = 0x1
-    # NEW_JOBS = 0x2
-    # JOB_COMPLETED_NOTIFICATION = 0x3
-    # CANCEL_JOB = 0x4
-    #
-    # FIND_MACHINES_BACKEND = 0x6
-    # SEARCH_RESULT = 0x10
-
 class _LTControl(enum.Enum):
     """ An internal control flag to tell what the thread handling Leet should
     do. This way all interaction happens via the internal control queue, making
@@ -339,7 +330,7 @@ class Leet(threading.Thread):
             search_request.ready = True
             self.notify_search_completed(search_request)
         else:
-            _MOD_LOGGER.warning("Search %s has been completed, remove from schedule", search_request.id)
+            _MOD_LOGGER.debug("Search %s has been completed, remove from schedule", search_request.id)
 
 
     def _can_reschedule_job(self, leet_job):

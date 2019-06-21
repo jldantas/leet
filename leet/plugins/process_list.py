@@ -18,12 +18,12 @@ class LeetPlugin(PluginBase):
 
 
         data = session.list_processes()
-        print(session.get_file("c:\\song.txt"))
+        #print(session.get_file("c:\\song.txt"))
 
         print(session.start_process("cmd /c hostname"))
 
-        with io.BytesIO(b"I dont like this song. I'm out") as f:
-            session.put_file(f, "c:\\created\\folder\\structuture\\nah.txt", True)
+        # with io.BytesIO(b"I dont like this song. I'm out") as f:
+        #     session.put_file(f, "c:\\created\\folder\\structuture\\nah.txt", True)
 
 
         return data

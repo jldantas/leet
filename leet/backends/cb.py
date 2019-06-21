@@ -83,7 +83,9 @@ class CBSession(LeetSession):
             "put_file" : self.raw_session.put_file,
             "delete_file" : self.raw_session.delete_file,
             "start_process" : self.raw_session.create_process,
-            "make_dir" : self.raw_session.create_directory}
+            "make_dir" : self.raw_session.create_directory,
+            "dir_list" : self.raw_session.list_directory
+            }
 
     def start_process(self, cmd_string, cwd=None, background=False):
         """See base class documentation"""
@@ -115,6 +117,7 @@ class CBSession(LeetSession):
 
         #This skips the root of the path
         check = []
+        necessary_create = False
         check.append(path_parts.pop(0))
 
         if recursive:
@@ -123,14 +126,17 @@ class CBSession(LeetSession):
                 if not self.exists(self.path_separator.join(check)):
                     #the moment we can't find a path, we need to create everything
                     #from there forward
+                    necessary_create = True
                     break
-            if i + 1 != len(path_parts):
+            if necessary_create:
                 check.pop(-1)
                 for missing_path in path_parts[i:]:
                     check.append(missing_path)
                     path = self.path_separator.join(check)
                     _MOD_LOGGER.debug("Trying to create path '%s' on the remote host", path)
                     self._execute("make_dir", path)
+            else:
+                _MOD_LOGGER.debug("No path need to be created.")
         else:
             self._execute("make_dir", remote_path)
 
@@ -149,8 +155,10 @@ class CBSession(LeetSession):
         path = self.path_separator.join(split_path[:idx]) + self.path_separator
 
         try:
-            list_dir = self.raw_session.list_directory(path)
-        except cbapi.live_response_api.LiveResponseError as e:
+            list_dir = self._execute("dir_list", path)
+            #list_dir = self.raw_session.list_directory(path)
+        except LeetCommandError as e:
+        # except cbapi.live_response_api.LiveResponseError as e:
             return False
 
         return bool([a for a in list_dir if a["filename"] == file_name])

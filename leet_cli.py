@@ -10,10 +10,9 @@ import tabulate
 
 import leet.backends.cb
 import leet.api
-#from leet.base import LeetJob, LeetJobStatus
 from leet.errors import LeetPluginError
 
-_LEVEL = logging.DEBUG
+_LEVEL = logging.INFO
 _MOD_LOGGER = logging.getLogger(__name__)
 _MOD_LOGGER.setLevel(_LEVEL)
 _log_handler = logging.StreamHandler()
@@ -31,16 +30,15 @@ def pairwise(iterable):
     return zip(a, a)
 
 def pretty_print(job):
-    print("JobID:", job.id, "\tResult: ", job.status)
+    print("\n")
+    print("-"*80)
+    print("JobID:", job.id, "\t| Hostname: ", job.machine.hostname, "\t| Result: ", job.status)
     print("--------- Result ----------")
-    print(tabulate.tabulate(job.plugin_result.data, headers="keys"))
-    #print(job.plugin_result.data)
+    print(tabulate.tabulate(job.plugin_result, headers="keys"))
 
 def pretty_jobs_status(jobs):
     """List of dicts containing 'id, hostname, status'"""
     print(tabulate.tabulate(jobs, headers="keys"))
-    #print(job.plugin_result.data)
-
 
 def _find_cb_profiles():
     """Find all the profiles available in the carbonblack.credentials files.
@@ -70,6 +68,7 @@ class LeetTerminal(cmd.Cmd):
 
         self._notify_thread = threading.Thread(target=self._wait_leet_notification, name="Thr-CLI-Notify")
         self.finished_jobs = []
+        self._notified = False
 
         #TODO allow backend configuration and setting
 
@@ -112,20 +111,17 @@ class LeetTerminal(cmd.Cmd):
         """Exit context"""
         self.shutdown()
 
-
     def _wait_leet_notification(self):
         while True:
             leet_job = self._notification_queue.get()
             if leet_job is None:
                 break
             else:
-                LeetTerminal.prompt = "! LEET> "
                 self.finished_jobs.append(leet_job)
-                #TODO do something
-                # if not self._notified:
-                #     print("\nSomething finished. Use 'show' to get the results.")
-                #     LeetTerminal.prompt = "! LEET> "
-                #     self._notified = True
+                if not self._notified:
+                    LeetTerminal.prompt = "! LEET> "
+                    print("\nSomething finished. Use 'results' to get the results.")
+                    self._notified = True
 
     def do_machines(self, args):
         """machines host1,host2,host3...
@@ -166,13 +162,7 @@ class LeetTerminal(cmd.Cmd):
         try:
             plugin = self._leet.get_plugin(plugin_name)
             plugin.parse_parameters(parameters)
-            # parameter_dict = {k:v for k,v in pairwise(parameters)}
-            # #validate the plugin in the most simple way
-            # plugin.set_param(parameter_dict)
-            # plugin.check_param()
-
             self.plugin = plugin
-
         except LeetPluginError as e:
             print(str(e))
 
@@ -246,19 +236,25 @@ class LeetTerminal(cmd.Cmd):
             print("Job cancelled.")
 
 
-    def do_show(self, args):
-        completed_jobs = self._leet.return_completed_jobs()
-        self._notified = False
+    def do_results(self, args):
         LeetTerminal.prompt = "LEET> "
+        self._notified = False
 
-        if completed_jobs:
-            for job in completed_jobs:
+        if self.finished_jobs:
+            for job in self.finished_jobs:
                 pretty_print(job)
         else:
             print("***No jobs have been completed.")
 
     def do_status(self, args):
+        """Shows a summary of the status of the jobs."""
         status = self._leet.job_status
+
+        for job in self.finished_jobs:
+            status.append({"id" : job.id,
+                           "hostname" : job.machine.hostname,
+                           "plugin": job.plugin_instance.LEET_PG_NAME,
+                           "status" : job.status})
         if status:
             pretty_jobs_status(status)
         else:
@@ -267,8 +263,8 @@ class LeetTerminal(cmd.Cmd):
     def do_cancel_all_jobs(self, args):
         self._leet.cancel_all_jobs()
 
-
     def do_exit(self, args):
+        """Close the program"""
         self.shutdown()
 
         return True
@@ -312,14 +308,13 @@ class LeetTerminal(cmd.Cmd):
 
     def do_test(self, line):
         #hostnames = ["US1004511WP", "DESKTOP-90N8EBG"]
-        hostnames = ["DESKTOP-90N8EBG"]
+        #hostnames = ["DESKTOP-90N8EBG"]
         #hostnames = ["US1004511WP"]
-        #hostnames = ["SPEEDYTURTLEW10"]
+        hostnames = ["SPEEDYTURTLEW10"]
+
 
         pg = self._leet.get_plugin("process_list")
-        #pg_param = {"path" : "c:\\"}
-        #pg_param = {"path" : "c:\\akljsdf"}
-        #pg.set_param(pg_param)
+        
         self._leet.schedule_jobs(pg, hostnames)
 
     def emptyline(self):

@@ -54,6 +54,8 @@ Not in a particular order of importance.
 - CLI should also read a job file and configure itself properly
 - Find a way to efficiently handle errors from threadpools (cb backend)
 - Save jobs to continue later
+- Do not wait for a command to be completed once the live response session
+  has started, it is more efficient (async?)
 
 ## Features
 
@@ -61,6 +63,11 @@ It will persistently and relentlessly try to connect to the endpoint and
 do it's best to execute whatever was requested.
 
 ## CHANGELOG
+
+### 0.3
+
+- Better defined API
+- Better defined error handling by sessions/plugins
 
 ### 0.2
 

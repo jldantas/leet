@@ -102,7 +102,7 @@ class LeetSession(metaclass=abc.ABCMeta):
 
     Warning:
         The 'raw_session' attribute can be used by any plugin, but it becomes
-        responsibility of the plugin to check if the class if of the right
+        responsibility of the plugin to check if the class is of the right
         type and correclty handle and/or raise the necessary errors.
 
     Attributes:
@@ -158,7 +158,7 @@ class LeetSession(metaclass=abc.ABCMeta):
             timeout (int): In seconds
 
         Returns:
-            (binary content): The contents of the file, as read
+            (binary content): The contents of the file, as binary stream
         """
         #TODO should we require the session backend returns any file, including locked ones?
 
@@ -170,7 +170,8 @@ class LeetSession(metaclass=abc.ABCMeta):
         create it, unless the disk doesn't exists.
 
         Args:
-            fp (file like object): A file like object with the data
+            fp (file like object): A file like object with the data opened as
+                binary
             remote_file_path (str): Absolute path where the file will be saved
             overwrite (bool): If the it is True, it will overwrite the file.
 
@@ -184,7 +185,10 @@ class LeetSession(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def delete_file(self, remote_file_path):
-        """Delete a file from the remote machine.
+        """Delete a file or directory from the remote machine.
+
+        If the a folder is passed to `remote_file_path`, it will recursively
+        delete all its contents.
 
         Args:
             remote_file_path (str): File path of the file to be deleted.
