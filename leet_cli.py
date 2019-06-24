@@ -204,6 +204,7 @@ class LeetTerminal(cmd.Cmd):
     #     print(text, line, begidx, endidx)
 
     def do_add_job(self, args):
+        """Add a job for processing. You will be requested to confirm the addition."""
 
         if self.hostname_list is None:
             print("Error, no machines defined. Use the commnad 'machines'")
@@ -237,6 +238,7 @@ class LeetTerminal(cmd.Cmd):
 
 
     def do_results(self, args):
+        """Print all the results"""
         LeetTerminal.prompt = "LEET> "
         self._notified = False
 
@@ -261,6 +263,7 @@ class LeetTerminal(cmd.Cmd):
             print("***No jobs pending")
 
     def do_cancel_all_jobs(self, args):
+        """Cancel all pending jobs"""
         self._leet.cancel_all_jobs()
 
     def do_exit(self, args):
@@ -285,7 +288,7 @@ class LeetTerminal(cmd.Cmd):
 
         if tokens[2] == "list":
             print("TODO help for list")
-        if tokens[2] == "set":
+        elif tokens[2] == "set":
             print("TODO help for set")
         else:
             print(self._leet.get_plugin(tokens[2]).get_help())
@@ -307,6 +310,8 @@ class LeetTerminal(cmd.Cmd):
             return lowered
 
     def do_test(self, line):
+        """This has an internal code used for testing. Do not use unless you
+        are developing somehing and changed the code accordingly"""
         #hostnames = ["US1004511WP", "DESKTOP-90N8EBG"]
         #hostnames = ["DESKTOP-90N8EBG"]
         #hostnames = ["US1004511WP"]
@@ -314,7 +319,7 @@ class LeetTerminal(cmd.Cmd):
 
 
         pg = self._leet.get_plugin("process_list")
-        
+
         self._leet.schedule_jobs(pg, hostnames)
 
     def emptyline(self):
@@ -323,80 +328,9 @@ class LeetTerminal(cmd.Cmd):
 
 def main():
 
-    #with LeetTerminal(["all"]) as cli:
-    with LeetTerminal() as cli:
+    with LeetTerminal(["all"]) as cli:
+    #with LeetTerminal() as cli:
             cli.cmdloop()
-
-    # try:
-    #     cli.conn_start()
-    #     cli.cmdloop()
-    # except KeyboardInterrupt:
-    #     #TODO if we cancel while still trying to connect?
-    #     print("Exiting event loop")
-    # # except Exception as e:
-    # #     print(e)
-    # finally:
-    #     cli.close()
-
-
-
-#
-#TIP when listing directories, tha final backslash is important
-
-# {'last_access_time': 1557479642, 'last_write_time': 1557479621, 'filename': 'pcr1_11.txt', 'create_time': 1557479642, 'attributes': ['ARCHIVE'], 'size': 0}
-
-# ======== SENSOR DATA ==================
-    #              boot_id: 0
-    #             build_id: 37
-    # build_version_string: 006.002.001.81002
-    #          clock_delta: 0
-    #    computer_dns_name: winwork
-    #        computer_name: WINWORK
-    #         computer_sid: S-1-5-21-2165326087-2182911670-1483370010
-    #               cookie: 330046951
-    #              display: True
-    #      emet_dump_flags:
-    #  emet_exploit_action:  (GPO configured)
-    #          emet_is_gpo: False
-    #   emet_process_count: 0
-    #  emet_report_setting:  (GPO configured)
-    #  emet_telemetry_path:
-    #         emet_version:
-    # event_log_flush_time: None
-    #             group_id: 13
-    #                   id: 396
-    #         is_isolating: False
-    #    last_checkin_time: 2019-05-15 13:17:17.073564+00:00
-    #          last_update: 2019-05-15 13:17:18.741825+00:00
-    #   license_expiration: 1990-01-01 00:00:00+00:00
-    #     network_adapters: 192.168.140.6,000c29f277e9|
-    # network_isolation_enabled: False
-    #    next_checkin_time: 2019-05-15 13:17:47.072763+00:00
-    #              node_id: 0
-    #                notes: None
-    #   num_eventlog_bytes: 6887000
-    # num_storefiles_bytes: 0
-    # os_environment_display_string: Windows 10 Professional, 64-bit
-    #    os_environment_id: 1
-    #              os_type: 1
-    #       parity_host_id: 0
-    # physical_memory_size: 8588865536
-    #          power_state: 0
-    #    registration_time: 2019-05-15 13:13:47.891765+00:00
-    #       restart_queued: False
-    # sensor_health_message: Healthy
-    # sensor_health_status: 100
-    #        sensor_uptime: 213
-    #             shard_id: 0
-    #               status: Online
-    # supports_2nd_gen_modloads: False
-    #        supports_cblr: True
-    #   supports_isolation: True
-    # systemvolume_free_size: 65150107648
-    # systemvolume_total_size: 85253419008
-    #            uninstall: False
-    #          uninstalled: None
-    #               uptime: 89063
 
 
 

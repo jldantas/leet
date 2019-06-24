@@ -32,7 +32,7 @@ Clone the git repository.
 
 ### Usage
 
-Run: `python leet.py`
+Run: `python leet_cli.py`
 
 #### Observations
 
