@@ -28,7 +28,7 @@ cbapi
 pip install tabulate apscheduler cbapi
 ```
 
-Clone the git repository.
+Clone the git repository and configure the backends.
 
 ### Usage
 
@@ -68,6 +68,8 @@ do it's best to execute whatever was requested.
 
 - Better defined API
 - Better defined error handling by sessions/plugins
+- LEET will stop execution if no backend is found
+- Added option to enable debug via command line
 
 ### 0.2
 

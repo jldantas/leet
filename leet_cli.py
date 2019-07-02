@@ -2,9 +2,14 @@
 # Leverage EDR for Execution of Things
 import time
 import logging
-import cmd, shlex
-import threading, queue
+import cmd
+import shlex
+import threading
+import queue
 import configparser
+import os
+import sys
+import argparse
 
 import tabulate
 
@@ -46,12 +51,23 @@ def _find_cb_profiles():
     Returns:
         list of str: A list with the name of each profile
     """
-    config = configparser.ConfigParser(default_section="cbbackend", strict=True)
-    config.read(".carbonblack/credentials.response")
-    profile_list = [sec_name for sec_name in config.keys() if sec_name != "cbbackend"]
-    _MOD_LOGGER.debug("Requested to read 'all' profiles. Found: %s", ",".join(profile_list))
+    dir_locations = [".carbonblack", os.path.join(os.path.expanduser("~"), ".carbonblack")]
+    cred_file = "credentials.response"
+    profiles = []
 
-    return profile_list
+    for dir in dir_locations:
+        cred_file_path = os.path.join(dir, cred_file)
+        _MOD_LOGGER.debug("Searching CB profiles on '%s'", cred_file_path)
+        if os.path.exists(cred_file_path):
+            _MOD_LOGGER.debug("File exists, parsing...")
+            config = configparser.ConfigParser(default_section="cbbackend", strict=True)
+            config.read(cred_file_path)
+            profiles += [sec_name for sec_name in config.keys() if sec_name != "cbbackend"]
+
+    if profiles:
+        _MOD_LOGGER.debug("Requested to read 'all' profiles. Found: %s", ",".join(profiles))
+
+    return profiles
 
 class LeetTerminal(cmd.Cmd):
     intro = "Starting LEET Terminal. Type '?' or 'help' for help."
@@ -81,6 +97,10 @@ class LeetTerminal(cmd.Cmd):
         else:
             profiles = cb_profiles
         backends += [leet.backends.cb.Backend(profile) for profile in profiles]
+
+        if not backends:
+            _MOD_LOGGER.error("No backends could be found for usage")
+            sys.exit(1)
 
         return backends
 
@@ -311,14 +331,15 @@ class LeetTerminal(cmd.Cmd):
 
     def do_test(self, line):
         """This has an internal code used for testing. Do not use unless you
-        are developing somehing and changed the code accordingly"""
+        are developing something and changed the code accordingly"""
         #hostnames = ["US1004511WP", "DESKTOP-90N8EBG"]
         #hostnames = ["DESKTOP-90N8EBG"]
         #hostnames = ["US1004511WP"]
         hostnames = ["SPEEDYTURTLEW10"]
 
-
-        pg = self._leet.get_plugin("process_list")
+        param = ["--source", "C:\Windows\\system32\\cmd.exe", "--dest", "C:\\tools\\scripts\\cb_test"]
+        pg = self._leet.get_plugin("file_download")
+        pg.parse_parameters(param)
 
         self._leet.schedule_jobs(pg, hostnames)
 
@@ -327,9 +348,20 @@ class LeetTerminal(cmd.Cmd):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug message.")
+    args = parser.parse_args()
 
-    with LeetTerminal(["all"]) as cli:
-    #with LeetTerminal() as cli:
+    if args.verbose:
+        global _LEVEL, _MOD_LOGGER, _log_handler, _leet_log
+        _LEVEL = logging.DEBUG
+        _MOD_LOGGER.setLevel(_LEVEL)
+        _log_handler.setLevel(_LEVEL)
+        _leet_log.setLevel(_LEVEL)
+
+
+    #with LeetTerminal(["all"]) as cli:
+    with LeetTerminal() as cli:
             cli.cmdloop()
 
 

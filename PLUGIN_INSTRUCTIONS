@@ -10,7 +10,7 @@ A plugin MUST define two class variables called: LEET_PG_NAME, LEET_PG_DESCRIPTI
 LEET_PG_NAME is the name of the plugin and how LEET will call it internally. It must
 be unique between all plugins. The LEET_PG_DESCRIPTION is a description of the plugin.
 
-The class create also needs to override the method 'run'.
+The class created also needs to override the method 'run'.
 The method 'run' receives an instance of the session with the machine (subclass of
 'leet.base.LeetSession' and an object with some basic machine information (object
 of 'leet.base.LeetMachine'.
@@ -19,7 +19,7 @@ it.
 
 If the plugin requires any parameters, the base class provides the attribute
 'arg_parser', which is an object of the argparse module. All the parameters should
-be added to it (read the official documentation). Once the plugin starts executing,
+be added to it (read the official argparse documentation). Once the plugin starts executing,
 the parsed arguments will be defined in the attribute 'args'.
 
 The newly created plugin MUST be stateless, which means that no information
