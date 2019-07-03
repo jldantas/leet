@@ -70,6 +70,7 @@ do it's best to execute whatever was requested.
 - Better defined error handling by sessions/plugins
 - LEET will stop execution if no backend is found
 - Added option to enable debug via command line
+- Added setup.py
 
 ### 0.2
 

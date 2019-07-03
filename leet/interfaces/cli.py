@@ -17,17 +17,7 @@ import leet.backends.cb
 import leet.api
 from leet.errors import LeetPluginError
 
-_LEVEL = logging.INFO
 _MOD_LOGGER = logging.getLogger(__name__)
-_MOD_LOGGER.setLevel(_LEVEL)
-_log_handler = logging.StreamHandler()
-_log_handler.setLevel(_LEVEL)
-_log_handler.setFormatter(logging.Formatter("%(asctime)s - %(threadName)s - %(message)s"))
-_MOD_LOGGER.addHandler(_log_handler)
-
-_leet_log = logging.getLogger("leet")
-_leet_log.addHandler(_log_handler)
-_leet_log.setLevel(_LEVEL)
 
 def pairwise(iterable):
     "s -> (s0, s1), (s2, s3), (s4, s5), ..."
@@ -346,22 +336,33 @@ class LeetTerminal(cmd.Cmd):
     def emptyline(self):
         pass
 
+def _config_verbose(level):
+    #root_logger = logging.getLogger()
+    leet_logger = logging.getLogger("leet")
+    log_handler = logging.StreamHandler()
+    log_handler.setFormatter(logging.Formatter("%(asctime)s - %(threadName)s - %(message)s"))
+
+    leet_logger.addHandler(log_handler)
+    leet_logger.setLevel(level)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug message.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug messages.")
     args = parser.parse_args()
 
     if args.verbose:
-        global _LEVEL, _MOD_LOGGER, _log_handler, _leet_log
-        _LEVEL = logging.DEBUG
-        _MOD_LOGGER.setLevel(_LEVEL)
-        _log_handler.setLevel(_LEVEL)
-        _leet_log.setLevel(_LEVEL)
+        _config_verbose(logging.DEBUG)
+    else:
+        _config_verbose(logging.INFO)
+        # global _LEVEL, _MOD_LOGGER, _log_handler, _leet_log
+        # _LEVEL = logging.DEBUG
+        # _MOD_LOGGER.setLevel(_LEVEL)
+        # _log_handler.setLevel(_LEVEL)
+        # _leet_log.setLevel(_LEVEL)
 
 
-    #with LeetTerminal(["all"]) as cli:
-    with LeetTerminal() as cli:
+    with LeetTerminal(["all"]) as cli:
+    #with LeetTerminal() as cli:
             cli.cmdloop()
 
 
