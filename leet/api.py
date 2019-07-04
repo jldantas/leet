@@ -49,6 +49,7 @@ import os
 import importlib
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.base import STATE_STOPPED as APS_SCHED_STOPPED
 
 from .base import LeetJob, LeetSearchRequest, LeetJobStatus
 from .errors import  LeetError, LeetSessionError, LeetPluginError
@@ -193,19 +194,31 @@ class Leet(threading.Thread):
         """
         self._queue.put((_LTControl.SEARCH_READY, search_request))
 
+    def _start_threads(self, stack):
+        # start the schedulers
+        temp_backend = {}
+
+        _MOD_LOGGER.debug("Starting schedulers...")
+        self._sched_machine.start()
+        self._sched_search.start()
+        _MOD_LOGGER.debug("Starting backend resources...")
+
+        for backend, pool in self._backend_list.values():
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=backend.max_sessions, thread_name_prefix="Thr-" + backend.backend_name + "-sessions")
+            temp_backend[backend.backend_name] = (backend, pool)
+            stack.enter_context(pool)
+            stack.enter_context(backend)
+            _MOD_LOGGER.debug("Finished allocating resources for backend '%s'", backend.backend_name)
+
+        self._backend_list = temp_backend
+        self.ready = True
+
     def run(self):
         """Starts LEET, the threads and backend connections, making LEET ready to be
         interacted with.
         """
         with contextlib.ExitStack() as stack:
-            #TOOD move to a function
-            #startup code
-            self._sched_machine.start()
-            self._sched_search.start()
-            _MOD_LOGGER.debug("Starting all backends")
-            for backend, pool in self._backend_list.values():
-                stack.enter_context(backend)
-            self.ready = True
+            self._start_threads(stack)
             #TODO this look ugly, redo
             backend_quantity = len(self._backend_list)
             #main loop
@@ -227,17 +240,15 @@ class Leet(threading.Thread):
                     self._job_notification.put(value)
 
     def _conf_backend(self, backend_list):
-        """Starts the threads resposible for connecting to the sessions to
-        the backends and links the backend with the Leet class.
+        """Links the backend with the Leet class.
 
         Args:
             backedn_list (LeetBackend*): A list of backend instances
         """
         for backend in backend_list:
-            _MOD_LOGGER.debug("Linking backend %s and allocating resources.", backend.backend_name)
+            _MOD_LOGGER.debug("Linking backend %s with LEET.", backend.backend_name)
             backend.leet = self
-            pool = concurrent.futures.ThreadPoolExecutor(max_workers=backend.max_sessions, thread_name_prefix="Thr-" + backend.backend_name + "sessions")
-            self._backend_list[backend.backend_name] = (backend, pool)
+            self._backend_list[backend.backend_name] = (backend, None)
 
     def _search_ready(self, search_request):
         """Internal method to process a search that is ready.
@@ -410,18 +421,28 @@ class Leet(threading.Thread):
         # for job in self._job_list:
         #     self.cancel_job(job)
 
+    def _stop_schedulers(self):
+        _MOD_LOGGER.debug("Closing scheduler threads...")
+        if self._sched_machine.state != APS_SCHED_STOPPED:
+            self._sched_machine.shutdown()
+        if self._sched_search.state != APS_SCHED_STOPPED:
+            self._sched_search.shutdown()
+
     def shutdown(self):
         """Stop the execution of Leet and free all the resources, including the
         backend resources."""
-        if self.ready:
-            self.ready = False
-            _MOD_LOGGER.debug("Requesting all threads to close")
-            self._queue.put((_LTControl.STOP, None))
-            _MOD_LOGGER.debug("Closing backend threads")
-            for backend, thread_pool in self._backend_list.values():
-                backend.shutdown()
-                thread_pool.shutdown()
+        self._stop_schedulers()
+        self._queue.put((_LTControl.STOP, None))
 
-            _MOD_LOGGER.debug("Closing scheduler threads")
-            self._sched_machine.shutdown()
-            self._sched_search.shutdown()
+        # if self.ready:
+        #     self.ready = False
+        #     _MOD_LOGGER.debug("Requesting all threads to close")
+        #     self._queue.put((_LTControl.STOP, None))
+        #     _MOD_LOGGER.debug("Closing backend threads")
+        #     for backend, thread_pool in self._backend_list.values():
+        #         backend.shutdown()
+        #         thread_pool.shutdown()
+
+
+            # self._sched_machine.shutdown()
+            # self._sched_search.shutdown()

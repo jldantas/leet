@@ -101,7 +101,7 @@ class LeetTerminal(cmd.Cmd):
         self._notify_thread.start()
 
         self._leet.start()
-        _MOD_LOGGER.info("Waiting for LEET to be ready.")
+        _MOD_LOGGER.info("Waiting for LEET to be ready...")
         while not self._leet.ready:
             time.sleep(1)
         _MOD_LOGGER.info("LEET is ready.")
@@ -115,10 +115,12 @@ class LeetTerminal(cmd.Cmd):
         self._leet.join()
 
     def __enter__(self):
-        return self.start_connections()
+        return self
+        #return self.start_connections()
 
     def __exit__(self, exeception_type, exception_value, traceback):
         """Exit context"""
+        print("*"*40 + "yo")
         self.shutdown()
 
     def _wait_leet_notification(self):
@@ -354,16 +356,15 @@ def main():
         _config_verbose(logging.DEBUG)
     else:
         _config_verbose(logging.INFO)
-        # global _LEVEL, _MOD_LOGGER, _log_handler, _leet_log
-        # _LEVEL = logging.DEBUG
-        # _MOD_LOGGER.setLevel(_LEVEL)
-        # _log_handler.setLevel(_LEVEL)
-        # _leet_log.setLevel(_LEVEL)
 
+    cli = LeetTerminal(["all"])
 
-    with LeetTerminal(["all"]) as cli:
-    #with LeetTerminal() as cli:
-            cli.cmdloop()
+    with cli.start_connections():
+    try:
+                cli.cmdloop()
+    except KeyboardInterrupt:
+        _MOD_LOGGER.info("Requesting all resources to close. Might take a while. Have faith.")
+        cli.shutdown()
 
 
 
