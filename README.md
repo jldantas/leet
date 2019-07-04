@@ -24,19 +24,42 @@ cbapi
 
 ### Installation
 
+Clone the git repository and use pip to manually install it. Pip should download
+all the necessary packages.
+
+In the folder where you cloned the respository:
+
 ```
-pip install tabulate apscheduler cbapi
+pip install .
 ```
 
-Clone the git repository and configure the backends.
+### Backend configuration
+
+It is expected that each backend requires a particular configuration on how to
+interface with backend, this may or may not include, server names/IPs, authentication,
+tokens, etc.
+
+#### Carbon Black
+
+Right now this is the only backend present. Add the servers, API tokens and, if
+necessary, proxy configuration as per instructions on:
+
+- https://cbapi.readthedocs.io/en/latest/getting-started.html
+- https://cbapi.readthedocs.io/en/latest/ - Section "API Credentials"
 
 ### Usage
 
-Run: `python leet_cli.py`
+After installation, an executable file called `leet_cli` should be present.
+Execution of this file from a terminal should start LEET.
 
 #### Observations
 
-TODO
+LEET not check for anything that is going to be executed on the machines. What
+this means is that if a plugin is wants to delete all files from a machine and
+the backend allows it, it will delete all the files, no questions asked.
+
+It is highly recommended that you review and test the source code of any plugins
+before executing.
 
 #### Examples
 
@@ -71,6 +94,7 @@ do it's best to execute whatever was requested.
 - LEET will stop execution if no backend is found
 - Added option to enable debug via command line
 - Added setup.py
+- Fixed a bug when of unclosed threads when LEET was stopped using Ctrl+C
 
 ### 0.2
 

@@ -1,0 +1,2 @@
+include README.md PLUGIN_INSTRUCTIONS BACKEND_INSTRUCTIONS LICENSE
+recursive-include leet *.py
