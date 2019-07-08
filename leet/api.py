@@ -318,6 +318,7 @@ class Leet(threading.Thread):
             _MOD_LOGGER.debug("Job %s failed. Error in plugin execution", leet_job.id)
             _MOD_LOGGER.exception(e)
             leet_job.error()
+            leet_job.plugin_result = [{"error_message": str(e)}]
             self._queue.put((_LTControl.JOB_DONE, leet_job))
 
     def _handle_errors(self, result):

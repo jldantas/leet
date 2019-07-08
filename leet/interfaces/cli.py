@@ -329,9 +329,10 @@ class LeetTerminal(cmd.Cmd):
         #hostnames = ["SPEEDYTURTLEW10"]
 
         #param = ["--source", "C:\Windows\\system32\\cmd.exe", "--dest", "C:\\tools\\scripts\\cb_test"]
-        #pg = self._leet.get_plugin("file_download")
-        param = ["--path", "C:\\maintenance"]
-        pg = self._leet.get_plugin("dirlist")
+        param = ["--source", "C:\\song.txt", "--dest", "C:\\tools\\scripts\\leet_dev"]
+        pg = self._leet.get_plugin("file_download")
+        # param = ["--path", "C:\\maintenance"]
+        # pg = self._leet.get_plugin("dirlist")
         pg.parse_parameters(param)
 
         self._leet.schedule_jobs(pg, hostnames)
@@ -358,8 +359,8 @@ def main():
     else:
         _config_verbose(logging.INFO)
 
-    #cli = LeetTerminal(["all"])
-    cli = LeetTerminal(["default"])
+    cli = LeetTerminal(["all"])
+    #cli = LeetTerminal(["default"])
 
     try:
         with cli.start_connections():

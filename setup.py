@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = "leet",
-    version = "0.3",
+    version = "0.4",
     author = "Julio Dantas",
     description = "Leverage EDR for Execution of Things",
     url = "https://github.com/jldantas/leet",
