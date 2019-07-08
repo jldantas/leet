@@ -15,6 +15,8 @@ class LeetPlugin(PluginBase):
         self.arg_parser.add_argument("--source", help="Absolute path of the file to be downloaded on the remote endpoint", required=True)
         self.arg_parser.add_argument("--dest", help="Absolute path where the file will be saved. If file name is ommited, it will use the file from source. The machine name will also be added", required=True)
 
+# {'last_access_time': 1515105722, 'last_write_time': 1515105722, 'filename': 'Boot', 'create_time': 1449789900, 'attributes': ['HIDDEN', 'SYSTEM', 'DIRECTORY'], 'size': 0}, 383786
+
     def _split_remote_path(self):
         if "\\" in self.args.source:
             sep = "\\"

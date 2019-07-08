@@ -37,6 +37,12 @@ class LeetSOType(enum.Enum):
     MAC = 0x3
     UNKNOWN = 0X10
 
+class LeetFileAttributes(enum.Enum):
+    """Defines the types of attributes in a file/directory"""
+    DIRECTORY = 0x0
+    HIDDEN = 0x1
+    SYSTEM = 0x2
+
 class LeetMachine(metaclass=abc.ABCMeta):
     """Represents a machine with the relevant information and how to
     interact in the scope of the LEET.
@@ -202,7 +208,7 @@ class LeetSession(metaclass=abc.ABCMeta):
         """
 
     @abc.abstractmethod
-    def make_dir(remote_path, recursive=True):
+    def make_dir(self, remote_path, recursive=True):
         """Creates a directory on the remote machine. This function WILL NOT
         check for root path and providing a path like "c:" or "/" is a violation.
 
@@ -211,6 +217,34 @@ class LeetSession(metaclass=abc.ABCMeta):
                 filename
             recursive (bool): If this flag is true, it will create all necessary
                 subdirectories in the path
+        """
+
+    @abc.abstractmethod
+    def list_dir(self, remote_path):
+        """Lists the contents of a directory on the remote machines.
+
+        Args:
+            remote_path (str): The remote path that will be created, WITHOUT the
+                filename
+
+        Returns:
+            (list of dicts): A list of dicts where each entry on the list represents
+                a file or directory and each dictionary MUST have the following format:
+                {"name" (str): Name of the file or directory,
+                 "size" (int): Size (in bytes),
+                 "attributes" (list of LeetFileAttributes): A list of the attributes for the entry,
+                 "create_time" (datetime): Date of creation, as seen by standard SO tools
+                 "modification_time" (datetime): Date of modification, as seen by standard SO tools
+                 }
+
+            For example:
+            [{"name": "abc.txt",
+            "size": 644,
+            "attributes": 856,
+            "create_time": datetime.datetime(2019-05-01 13:00:00),
+            "modification_time": datetime.datetime(2019-05-01 13:00:00),
+            }]
+
         """
 
     @abc.abstractmethod

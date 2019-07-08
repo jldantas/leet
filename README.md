@@ -95,6 +95,7 @@ do it's best to execute whatever was requested.
 - Added option to enable debug via command line
 - Added setup.py
 - Fixed a bug when of unclosed threads when LEET was stopped using Ctrl+C
+- Added support for directory listing on a session
 
 ### 0.2
 

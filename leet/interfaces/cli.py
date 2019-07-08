@@ -120,7 +120,6 @@ class LeetTerminal(cmd.Cmd):
 
     def __exit__(self, exeception_type, exception_value, traceback):
         """Exit context"""
-        print("*"*40 + "yo")
         self.shutdown()
 
     def _wait_leet_notification(self):
@@ -325,12 +324,14 @@ class LeetTerminal(cmd.Cmd):
         """This has an internal code used for testing. Do not use unless you
         are developing something and changed the code accordingly"""
         #hostnames = ["US1004511WP", "DESKTOP-90N8EBG"]
-        #hostnames = ["DESKTOP-90N8EBG"]
+        hostnames = ["DESKTOP-90N8EBG"]
         #hostnames = ["US1004511WP"]
-        hostnames = ["SPEEDYTURTLEW10"]
+        #hostnames = ["SPEEDYTURTLEW10"]
 
-        param = ["--source", "C:\Windows\\system32\\cmd.exe", "--dest", "C:\\tools\\scripts\\cb_test"]
-        pg = self._leet.get_plugin("file_download")
+        #param = ["--source", "C:\Windows\\system32\\cmd.exe", "--dest", "C:\\tools\\scripts\\cb_test"]
+        #pg = self._leet.get_plugin("file_download")
+        param = ["--path", "C:\\maintenance"]
+        pg = self._leet.get_plugin("dirlist")
         pg.parse_parameters(param)
 
         self._leet.schedule_jobs(pg, hostnames)
@@ -357,10 +358,11 @@ def main():
     else:
         _config_verbose(logging.INFO)
 
-    cli = LeetTerminal(["all"])
+    #cli = LeetTerminal(["all"])
+    cli = LeetTerminal(["default"])
 
-    with cli.start_connections():
     try:
+        with cli.start_connections():
                 cli.cmdloop()
     except KeyboardInterrupt:
         _MOD_LOGGER.info("Requesting all resources to close. Might take a while. Have faith.")
