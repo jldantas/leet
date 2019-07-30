@@ -27,8 +27,8 @@ def pairwise(iterable):
 def pretty_print(job):
     print("\n")
     print("-"*80)
-    print("JobID:", job.id, "\t| Hostname: ", job.machine.hostname, "\t| Result: ", job.status)
-    print("--------- Result ----------")
+    print("JobID:", job.id, " | Hostname: ", job.machine.hostname, " | Result: ", job.status.name)
+    print("-" * 36, "Result", "-" * 36)
     print(tabulate.tabulate(job.plugin_result, headers="keys"))
 
 def pretty_jobs_status(jobs):
@@ -141,6 +141,7 @@ class LeetTerminal(cmd.Cmd):
         """
         lex_parser = shlex.shlex(args)
         lex_parser.whitespace += ","
+        lex_parser.wordchars += "-"
 
         machine_list = [m for m in lex_parser]
         #TODO check if the hostname has space in it, if yes, invalid.
@@ -328,9 +329,11 @@ class LeetTerminal(cmd.Cmd):
         #hostnames = ["US1004511WP"]
         #hostnames = ["SPEEDYTURTLEW10"]
 
+        param = ["--dest", "C:\\tools\\scripts\\leet_dev"]
+        pg = self._leet.get_plugin("get_collection")
         #param = ["--source", "C:\Windows\\system32\\cmd.exe", "--dest", "C:\\tools\\scripts\\cb_test"]
-        param = ["--source", "C:\\song.txt", "--dest", "C:\\tools\\scripts\\leet_dev"]
-        pg = self._leet.get_plugin("file_download")
+        #param = ["--source", "C:\\song.txt", "--dest", "C:\\tools\\scripts\\leet_dev"]
+        #pg = self._leet.get_plugin("file_download")
         # param = ["--path", "C:\\maintenance"]
         # pg = self._leet.get_plugin("dirlist")
         pg.parse_parameters(param)

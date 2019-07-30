@@ -56,7 +56,9 @@ class CBMachine(LeetMachine):
             return CBSession(self.sensor.lr_session(), self)
         except cbapi.errors.TimeoutError as e:
             raise LeetSessionError("Timed out when requesting a session to cbapi") from e
-        return CBSession(self.sensor.lr_session(), self)
+        except cbapi.errors.ObjectNotFoundError as e:
+            raise LeetSessionError("Max limit of sessions opened") from e
+        #return CBSession(self.sensor.lr_session(), self)
 
 class CBSession(LeetSession):
     """Represents a new session using the CB backend.
@@ -260,7 +262,7 @@ class Backend(LeetBackend):
             profile_name (str): The profile name that this class will connect,
                 as seen in the 'credentials.response' file.
         """
-        super().__init__("CB-" + profile_name, 10) #TODO move max_session to a configuration/variable
+        super().__init__("CB-" + profile_name, 7) #TODO move max_session to a configuration/variable
         self._profile_name = profile_name
         self._cb = None
 
@@ -296,7 +298,7 @@ class Backend(LeetBackend):
             if recent_sensor is None:
                 recent_sensor = sensor
             else:
-                if sensor.last_checkin_time > recent_sensor.sensor.last_checkin_time:
+                if sensor.last_checkin_time > recent_sensor.last_checkin_time:
                     recent_sensor = sensor
 
         return recent_sensor

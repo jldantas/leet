@@ -47,6 +47,7 @@ import logging
 import datetime
 import os
 import importlib
+import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.schedulers.base import STATE_STOPPED as APS_SCHED_STOPPED
@@ -277,6 +278,7 @@ class Leet(threading.Thread):
         with self._job_list_lock:
             self._job_list.append(leet_job)
             self._sched_machine.add_job(self._is_machine_ready, 'date', args=[leet_job])
+            time.sleep(0.1)
 
     def _remove_job(self, leet_job):
         """Removes a job from the job list."""

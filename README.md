@@ -27,7 +27,7 @@ cbapi
 Clone the git repository and use pip to manually install it. Pip should download
 all the necessary packages.
 
-In the folder where you cloned the respository:
+In the folder where you cloned the repository:
 
 ```
 pip install .
@@ -54,7 +54,7 @@ Execution of this file from a terminal should start LEET.
 
 #### Observations
 
-LEET not check for anything that is going to be executed on the machines. What
+LEET doesn't check for anything that is going to be executed on the machines. What
 this means is that if a plugin is wants to delete all files from a machine and
 the backend allows it, it will delete all the files, no questions asked.
 
@@ -86,6 +86,12 @@ It will persistently and relentlessly try to connect to the endpoint and
 do it's best to execute whatever was requested.
 
 ## CHANGELOG
+
+### 0.4.1
+
+- Bug fix
+- CB Backend - Adjusted the maximum simultaneous connections to 7
+- Fixed an issue when many machines were queued for jobs and the scheduler lost the execution time
 
 ### 0.4
 
