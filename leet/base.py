@@ -251,6 +251,9 @@ class LeetSession(metaclass=abc.ABCMeta):
     def exists(self, remote_file_path):
         """Checks if a path or file exist.
 
+        Checkes if a path or file exists, it also considers the target
+        OS and performs the correct case comparison.
+
         Note:
             This method HAS to correctly handle files and directories!
 

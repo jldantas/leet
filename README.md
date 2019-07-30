@@ -92,6 +92,7 @@ do it's best to execute whatever was requested.
 - Bug fix
 - CB Backend - Adjusted the maximum simultaneous connections to 7
 - Fixed an issue when many machines were queued for jobs and the scheduler lost the execution time
+- Fixed package installation issue for the backends subpackage
 
 ### 0.4
 
